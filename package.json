@@ -1,0 +1,20 @@
+{
+  "name": "frontier-ai-platform",
+  "version": "1.0.0",
+  "description": "Frontier AI Internal Platform - Working Prototype with Blind Anonymous Voting, Task Tracking, and 2-Man Governance",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "keywords": [
+    "frontier-ai",
+    "zero-cost",
+    "anonymous-voting",
+    "two-man-rule",
+    "governance"
+  ],
+  "author": "Frontier AI Engineering Team",
+  "license": "MIT"
+}

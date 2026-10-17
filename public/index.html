@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Frontier AI Workspace — Internal Engineering Platform</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+  <!-- Toast Notification System -->
+  <div id="toast" class="toast hidden" role="alert" aria-live="polite">
+    <span id="toast-icon" class="toast-icon"></span>
+    <span id="toast-message" class="toast-message"></span>
+  </div>
+
+  <!-- ======================================================== -->
+  <!-- AUTH SCREEN: GOOGLE WORKSPACE STYLE LOGIN UI -->
+  <!-- ======================================================== -->
+  <div id="auth-screen" class="auth-screen-layout">
+    <div class="auth-card">
+      <div class="auth-brand-header">
+        <div class="brand-logo-icon logo-large">
+          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+        </div>
+        <h2>Sign in to Frontier AI</h2>
+        <p>Use your Allowlisted Frontier AI GitHub Identity</p>
+      </div>
+
+      <!-- OAuth Status / Error Alert Banner -->
+      <div id="auth-alert" class="auth-alert hidden">
+        <span class="auth-alert-icon">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        </span>
+        <div class="auth-alert-text" id="auth-alert-text"></div>
+      </div>
+
+      <!-- Real GitHub OAuth 2.0 Button -->
+      <a href="/api/auth/github" class="btn btn-github btn-block" id="btn-github-oauth">
+        <svg class="gh-icon" viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+          <path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/>
+        </svg>
+        <span>Sign in with GitHub</span>
+      </a>
+
+      <div class="auth-divider"><span>OR SIGN IN WITH USERNAME</span></div>
+
+      <form id="form-login" class="auth-form">
+        <div class="form-field">
+          <label for="login-identifier">Username or Numeric GitHub ID</label>
+          <input type="text" id="login-identifier" class="input-text" placeholder="e.g. alice_v or 10101" required>
+        </div>
+        <button type="submit" class="btn btn-filled btn-block" id="btn-login-submit">
+          Sign In
+        </button>
+      </form>
+
+      <div class="auth-quick-select">
+        <div class="quick-select-title">Fast Switch Preview Accounts:</div>
+        
+        <div class="quick-pill-group">
+          <div class="role-group-label">Team Lead (Admin):</div>
+          <button class="btn-demo-pill pill-lead" data-id="10101">
+            <span><strong>Alice Vance</strong> (@alice_v)</span>
+            <span class="host-pill-tag">Lead</span>
+          </button>
+
+          <div class="role-group-label">Team Member (Participant):</div>
+          <button class="btn-demo-pill" data-id="10102">
+            <span><strong>Bob Ross</strong> (@bob_r)</span>
+            <span class="nav-badge">Member</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="auth-security-footer">
+        <span>Allowlist Enforced · 8 Registered Team Members</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- App Wrapper: Google Workspace Style Layout -->
+  <div class="workspace-layout hidden" id="workspace-app">
+
+    <!-- Top App Bar (Workspace Header) -->
+    <header class="workspace-header">
+      <div class="header-left">
+        <button id="btn-toggle-sidebar" class="btn-icon" title="Toggle Navigation Menu">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="12" x2="21" y2="12"></line><line x1="3" y1="6" x2="21" y2="6"></line><line x1="3" y1="18" x2="21" y2="18"></line></svg>
+        </button>
+        <div class="brand-pill">
+          <div class="brand-logo-icon">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
+          </div>
+          <div class="brand-text">
+            <span class="workspace-org-name">Frontier AI</span>
+            <span class="workspace-product-tag">Platform</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Center Search / Quick Palette -->
+      <div class="header-center">
+        <div class="search-box">
+          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <input type="text" id="global-search-input" placeholder="Search tasks, meetings, voting, or team directory (Ctrl+K)...">
+          <span class="search-kbd">Ctrl+K</span>
+        </div>
+      </div>
+
+      <!-- Right Account / Persona Switcher Chip -->
+      <div class="header-right">
+        <div class="account-chip" id="user-chip-menu-trigger" title="Switch active profile">
+          <div class="user-avatar" id="header-user-avatar">AV</div>
+          <div class="user-details">
+            <div class="user-name-row">
+              <span class="user-name" id="header-user-name">Alice Vance</span>
+              <span class="host-pill-tag" id="header-host-indicator">LEAD</span>
+            </div>
+            <span class="user-role-badge" id="header-user-role">Team Lead</span>
+          </div>
+          <svg class="chip-dropdown-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
+        </div>
+
+        <!-- Account / Persona Switcher Dropdown Modal/Card -->
+        <div id="persona-dropdown-menu" class="persona-menu hidden">
+          <div class="persona-menu-header">
+            <h4>Frontier AI Team Accounts</h4>
+            <p>Switch between Team Lead and Member accounts</p>
+          </div>
+          <div class="persona-list" id="persona-list-items">
+            <!-- Dynamically populated -->
+          </div>
+          <div class="persona-menu-footer">
+            <button id="btn-simulate-mallory" class="btn-negative-test">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+              Simulate Unauthorized Account (ID 9999)
+            </button>
+          </div>
+          <div class="persona-menu-signout">
+            <button id="btn-header-signout" class="btn btn-outlined btn-block">Sign Out</button>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Workspace Main Body (Sidebar + Content Canvas) -->
+    <div class="workspace-body">
+
+      <!-- Left Sidebar Navigation Rail -->
+      <aside class="workspace-sidebar" id="sidebar">
+        <div class="sidebar-section">
+          <div class="sidebar-section-title">WORKSPACES</div>
+          <button class="nav-item active" data-view="view-personal">
+            <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
+            <span class="nav-label">My Workspace</span>
+            <span class="nav-badge badge-blue" id="badge-my-tasks-count">2</span>
+          </button>
+          <button class="nav-item" data-view="view-global">
+            <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="2" y1="12" x2="22" y2="12"></line><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"></path></svg>
+            <span class="nav-label">Global Team Hub</span>
+          </button>
+          <button class="nav-item" data-view="view-tasks">
+            <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"></path><rect x="8" y="2" width="8" height="4" rx="1" ry="1"></rect><path d="m9 14 2 2 4-4"></path></svg>
+            <span class="nav-label">Sprint Board</span>
+            <span class="nav-badge" id="badge-tasks-count">6</span>
+          </button>
+          <button class="nav-item" data-view="view-voting">
+            <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 12 2 2 4-4"></path><path d="M5 7c0-1.1.9-2 2-2h10a2 2 0 0 1 2 2v12H5V7Z"></path><path d="M22 19H2"></path></svg>
+            <span class="nav-label">Peer Evaluation</span>
+            <span class="nav-badge badge-active" id="badge-voting-status">ACTIVE</span>
+          </button>
+          <button class="nav-item" data-view="view-calendar">
+            <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+            <span class="nav-label">Calendar &amp; Meetings</span>
+            <span class="nav-badge" id="badge-cal-count">4</span>
+          </button>
+          <button class="nav-item" data-view="view-team">
+            <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
+            <span class="nav-label">Team Directory</span>
+            <span class="nav-badge">8</span>
+          </button>
+        </div>
+
+        <div class="sidebar-divider" id="sidebar-admin-divider"></div>
+
+        <div class="sidebar-section" id="sidebar-admin-section">
+          <div class="sidebar-section-title">ADMINISTRATION</div>
+          <button class="nav-item" data-view="view-governance">
+            <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+            <span class="nav-label">Two-Man Rule</span>
+          </button>
+          <button class="nav-item" data-view="view-audit">
+            <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <span class="nav-label">Audit Trail</span>
+          </button>
+          <button class="nav-item" data-view="view-recovery">
+            <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            <span class="nav-label">Disaster Recovery</span>
+          </button>
+        </div>
+
+        <!-- Role Context Box -->
+        <div class="sidebar-bottom-card" id="sidebar-role-card">
+          <div class="cost-target-label">
+            <span class="cost-pill" id="sidebar-role-indicator">Role: Member</span>
+            <span class="health-indicator"><span class="status-dot"></span> Active</span>
+          </div>
+          <p class="cost-target-desc" id="sidebar-role-desc">Assigned deliverables, review requests, and anonymous peer evaluations.</p>
+        </div>
+      </aside>
+
+      <!-- Main Canvas Area -->
+      <main class="workspace-canvas">
+
+        <!-- ======================================================== -->
+        <!-- VIEW 1: PERSONAL DASHBOARD ("MY WORKSPACE") -->
+        <!-- ======================================================== -->
+        <section id="view-personal" class="workspace-view active">
+          
+          <div class="view-header">
+            <div>
+              <div class="greeting-row">
+                <h2 class="view-title">Welcome back, <span id="personal-greeting-name">Alice Vance</span></h2>
+                <span class="kpi-tag tag-blue" id="personal-host-tag">Team Lead</span>
+              </div>
+              <p class="view-subtitle">Assigned deliverables, sprint deadlines, and upcoming team meetings</p>
+            </div>
+            <div class="header-action-group">
+              <button class="btn btn-filled" id="btn-open-submit-deliverable">+ Submit Deliverable</button>
+            </div>
+          <!-- Active Live Meeting Alert Banner -->
+          <div id="personal-live-meeting-banner" class="live-meeting-banner card" style="display: none; margin-bottom: 24px;">
+            <div class="live-banner-left">
+              <span class="live-pulse-badge">LIVE SESSION</span>
+              <div>
+                <h3 class="live-meeting-title" id="live-meeting-title">Sprint Architecture Review</h3>
+                <p class="live-meeting-meta" id="live-meeting-meta">Hosted by Team Lead · Meeting Bridge 1</p>
+              </div>
+            </div>
+            <div class="live-banner-actions" id="live-banner-actions">
+              <button class="btn btn-filled btn-join-live" id="btn-join-live-meeting">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
+                Join Secure Session
+              </button>
+            </div>
+          </div>
+
+          <!-- Personal KPI Summary -->
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span class="kpi-title">Assigned Tasks</span>
+                <span class="kpi-tag tag-blue" id="personal-tasks-status-tag">Personal Progress</span>
+              </div>
+              <div class="kpi-body">
+                <div class="kpi-hero-number" id="personal-completion-rate">0%</div>
+                <div class="kpi-progress-bar">
+                  <div class="kpi-progress-fill" id="personal-tasks-fill" style="width: 0%;"></div>
+                </div>
+                <div class="kpi-subtext" id="personal-tasks-subtext">Loading assigned tasks...</div>
+              </div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span class="kpi-title">Deadlines &amp; Meetings</span>
+                <span class="kpi-tag tag-green">Scheduled</span>
+              </div>
+              <div class="kpi-body">
+                <div class="kpi-hero-number" id="personal-events-count">2 Events</div>
+                <div class="kpi-subtext" id="personal-next-event-text">Next: Architecture Sync</div>
+              </div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span class="kpi-title">Peer Performance Review</span>
+                <span class="kpi-tag tag-amber" id="personal-ballot-status-tag">Sprint 1</span>
+              </div>
+              <div class="kpi-body">
+                <div class="kpi-hero-number" id="personal-vote-status-text">Pending Vote</div>
+                <div class="kpi-subtext">Submit your anonymous evaluation for your peers</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Personal Two-Column Layout -->
+          <div class="dashboard-split-grid">
+            <!-- Left: Tasks Allocated to Me -->
+            <div class="dashboard-col card">
+              <div class="col-header">
+                <div class="col-title-group">
+                  <h4>My Assigned Tasks</h4>
+                  <span class="col-subtitle">Active deliverables assigned to you</span>
+                </div>
+                <span class="column-count" id="personal-task-count-pill">0</span>
+              </div>
+              <div class="compact-task-list" id="personal-allocated-tasks-list">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+
+            <!-- Right: My Calendar & Meeting Pings -->
+            <div class="dashboard-col card">
+              <div class="col-header">
+                <div class="col-title-group">
+                  <h4>Upcoming Deadlines &amp; Meetings</h4>
+                  <span class="col-subtitle">Meeting rooms and submission dates</span>
+                </div>
+                <button class="btn-text" id="btn-jump-to-calendar">Full Calendar →</button>
+              </div>
+              <div class="pings-list" id="personal-calendar-pings-list">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 2: GLOBAL TEAM HUB (PUBLIC TEAM PROFILE) -->
+        <!-- ======================================================== -->
+        <section id="view-global" class="workspace-view">
+          
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Frontier AI Team Hub</h2>
+              <p class="view-subtitle">Team velocity, sprint progress, and cross-functional deliverables</p>
+            </div>
+            <div class="header-action-group">
+              <span class="status-pill pill-purple">8 Members Active</span>
+              <button class="btn btn-filled" id="btn-host-allot-trigger">+ Assign Task</button>
+            </div>
+          </div>
+
+          <!-- Team-Wide Metrics -->
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span class="kpi-title">Overall Sprint 1 Progress</span>
+                <span class="kpi-tag tag-blue">Global Team</span>
+              </div>
+              <div class="kpi-body">
+                <div class="kpi-hero-number" id="global-team-completion">67%</div>
+                <div class="kpi-progress-bar">
+                  <div class="kpi-progress-fill" id="global-team-fill" style="width: 67%;"></div>
+                </div>
+                <div class="kpi-subtext" id="global-team-breakdown">4 Completed • 2 In Progress • 0 Backlog</div>
+              </div>
+            </div>
+
+            <div class="kpi-card" id="card-global-vote">
+              <div class="kpi-header">
+                <span class="kpi-title">Peer Performance Review</span>
+                <span class="kpi-tag tag-green">Anonymous Booth</span>
+              </div>
+              <div class="kpi-body">
+                <div class="kpi-hero-number" id="global-vote-ratio">2 / 8</div>
+                <div class="kpi-progress-bar">
+                  <div class="kpi-progress-fill progress-green" id="global-vote-fill" style="width: 25%;"></div>
+                </div>
+                <div class="kpi-subtext">25% Participation • Decoupled Cryptographic Tokens</div>
+              </div>
+            </div>
+
+            <div class="kpi-card">
+              <div class="kpi-header">
+                <span class="kpi-title">Engineering Split</span>
+                <span class="kpi-tag tag-purple">Active Tracks</span>
+              </div>
+              <div class="kpi-body">
+                <div class="kpi-hero-number">3 &amp; 3</div>
+                <div class="kpi-split-stat">
+                  <span>3 Backend Devs</span> • <span>3 Frontend Devs</span> • <span>2 Lead</span>
+                </div>
+                <div class="kpi-subtext">Zero single points of failure</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Global Schedule Banner -->
+          <div class="dashboard-banner card">
+            <div class="banner-content">
+              <h3>Frontier AI Sprint 1 Milestone Roadmap</h3>
+              <p>Host: Alice Vance. All participants can review tasks, submit deliverables with PR links, and vote anonymously on performance.</p>
+            </div>
+            <div class="banner-actions">
+              <button class="btn btn-filled" id="btn-global-open-voting">Cast Anonymous Peer Vote</button>
+              <button class="btn btn-outlined" id="btn-global-view-cal">View Master Calendar</button>
+            </div>
+          </div>
+
+          <!-- Global Team Directory Overview -->
+          <div class="card">
+            <div class="col-header">
+              <div class="col-title-group">
+                <h4>Team Members &amp; Task Allocations</h4>
+                <span class="col-subtitle">Track contributions across the 8 verified members</span>
+              </div>
+              <button class="btn-text" id="btn-jump-to-roster">View Full Profiles →</button>
+            </div>
+            <div class="team-overview-table-wrap">
+              <table class="workspace-table">
+                <thead>
+                  <tr>
+                    <th>Member</th>
+                    <th>Role</th>
+                    <th>Track</th>
+                    <th>Allocated Tasks</th>
+                    <th>Status</th>
+                  </tr>
+                </thead>
+                <tbody id="global-team-table-body">
+                  <!-- Dynamically populated -->
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 3: SPRINT KANBAN BOARD -->
+        <!-- ======================================================== -->
+        <section id="view-tasks" class="workspace-view">
+          
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Sprint Tasks Board</h2>
+              <p class="view-subtitle">Sprint tracking and deliverable submissions across backend and frontend tracks</p>
+            </div>
+            <div class="header-action-group">
+              <div class="pill-group" id="task-filter-pills">
+                <button class="pill active" data-filter="all">All Tracks</button>
+                <button class="pill" data-filter="backend">Backend</button>
+                <button class="pill" data-filter="frontend">Frontend</button>
+                <button class="pill" data-filter="lead">Coordination</button>
+              </div>
+              <button class="btn btn-filled" id="btn-open-task-modal">+ New Task</button>
+            </div>
+          </div>
+
+          <div class="kanban-board">
+            <!-- TO DO -->
+            <div class="kanban-column" id="col-todo">
+              <div class="column-header">
+                <div class="column-title-wrap">
+                  <span class="column-dot dot-todo"></span>
+                  <span class="column-name">TO DO</span>
+                </div>
+                <span class="column-count" id="count-todo">0</span>
+              </div>
+              <div class="column-cards" id="cards-todo"></div>
+            </div>
+
+            <!-- IN PROGRESS -->
+            <div class="kanban-column" id="col-in-progress">
+              <div class="column-header">
+                <div class="column-title-wrap">
+                  <span class="column-dot dot-progress"></span>
+                  <span class="column-name">IN PROGRESS</span>
+                </div>
+                <span class="column-count" id="count-in-progress">0</span>
+              </div>
+              <div class="column-cards" id="cards-in-progress"></div>
+            </div>
+
+            <!-- COMPLETED -->
+            <div class="kanban-column" id="col-completed">
+              <div class="column-header">
+                <div class="column-title-wrap">
+                  <span class="column-dot dot-completed"></span>
+                  <span class="column-name">COMPLETED</span>
+                </div>
+                <span class="column-count" id="count-completed">0</span>
+              </div>
+              <div class="column-cards" id="cards-completed"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 4: ANONYMOUS PEER PERFORMANCE VOTING -->
+        <!-- ======================================================== -->
+        <section id="view-voting" class="workspace-view">
+          
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Anonymous Peer Evaluation</h2>
+              <p class="view-subtitle">Cryptographically blinded ballots with decoupled token eligibility</p>
+            </div>
+            <div class="header-action-group">
+              <span class="status-pill pill-green" id="voting-status-pill">Active Round 1</span>
+              <button class="btn btn-outlined" id="btn-host-close-voting">Close Session &amp; Reveal</button>
+            </div>
+          </div>
+
+          <!-- Stepper Track -->
+          <div class="stepper-card card">
+            <div class="stepper-track">
+              <div class="step-node completed" id="step-node-1">
+                <div class="node-icon">
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                </div>
+                <div class="node-content">
+                  <div class="node-title">1. Verified Member</div>
+                  <div class="node-desc" id="stepper-member-label">Alice Vance</div>
+                </div>
+              </div>
+              <div class="stepper-line completed" id="step-line-1"></div>
+
+              <div class="step-node" id="step-node-2">
+                <div class="node-icon">2</div>
+                <div class="node-content">
+                  <div class="node-title">2. Claim Blind Token</div>
+                  <div class="node-desc" id="stepper-token-label">Identity decoupled</div>
+                </div>
+              </div>
+              <div class="stepper-line" id="step-line-2"></div>
+
+              <div class="step-node" id="step-node-3">
+                <div class="node-icon">3</div>
+                <div class="node-content">
+                  <div class="node-title">3. Vote for Member</div>
+                  <div class="node-desc">Unlinked ballot drop</div>
+                </div>
+              </div>
+              <div class="stepper-line" id="step-line-3"></div>
+
+              <div class="step-node" id="step-node-4">
+                <div class="node-icon">4</div>
+                <div class="node-content">
+                  <div class="node-title">4. Peer Recognition Tally</div>
+                  <div class="node-desc">Revealed by Host</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="voting-workspace-grid">
+            <div class="voting-main-card card">
+              <div class="session-info-badge">
+                <span class="info-label">EVALUATION ROUND:</span>
+                <span class="info-id">SPRINT-1-PEER-REVIEW</span>
+              </div>
+              <h3 class="session-headline" id="voting-session-headline">Sprint 1 Peer Performance &amp; Impact Evaluation</h3>
+              <p class="session-summary" id="voting-session-summary">Vote for the peer who demonstrated the highest technical impact, reliability, and support in Sprint 1.</p>
+
+              <!-- State 1: Claim Blind Token -->
+              <div id="voting-claim-box" class="voting-subsurface">
+                <div class="subsurface-header">
+                  <div class="icon-circle icon-blue">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
+                  </div>
+                  <div>
+                    <h4>Step 1: Verify Eligibility &amp; Claim Token</h4>
+                    <p id="voting-claim-desc">Your member identity is stamped in the eligibility ledger, and an unlinked HMAC token is generated with zero voter identity.</p>
+                  </div>
+                </div>
+                <div class="subsurface-actions">
+                  <button id="btn-claim-blind-token" class="btn btn-filled">Claim Blind Ballot Token</button>
+                </div>
+              </div>
+
+              <!-- State 2: Cast Ballot for a Team Member -->
+              <div id="voting-cast-box" class="voting-subsurface hidden">
+                <div class="subsurface-header">
+                  <div class="icon-circle icon-green">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 12 2 2 4-4"></path><path d="M5 7c0-1.1.9-2 2-2h10a2 2 0 0 1 2 2v12H5V7Z"></path><path d="M22 19H2"></path></svg>
+                  </div>
+                  <div>
+                    <h4>Step 2: Cast Your Anonymous Vote for a Team Member</h4>
+                    <p>Select the team member you wish to recognize for Sprint 1. The ballot carries NO member identity.</p>
+                  </div>
+                </div>
+
+                <form id="form-submit-ballot" class="ballot-choices-form">
+                  <div class="choices-stack" id="ballot-options-container">
+                    <!-- Populated dynamically with Team Members -->
+                  </div>
+
+                  <div class="token-proof-box">
+                    <span class="proof-label">Cryptographic Token Attached (HMAC Signature):</span>
+                    <code id="display-blind-token" class="proof-code">...</code>
+                  </div>
+
+                  <div class="subsurface-actions">
+                    <button type="submit" class="btn btn-filled">Submit Anonymous Performance Vote</button>
+                  </div>
+                </form>
+              </div>
+
+              <!-- State 3: Voted -->
+              <div id="voting-completed-box" class="voting-subsurface hidden">
+                <div class="subsurface-header">
+                  <div class="icon-circle icon-green">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                  </div>
+                  <div>
+                    <h4>Ballot Confirmed in Anonymous Ballot Box</h4>
+                    <p id="voting-status-msg">Your performance vote has been committed with an unlinked cryptographic token. The results will be tallied in aggregate.</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Participation & Tally -->
+            <div class="voting-stats-card card">
+              <h4 class="stats-card-title">Peer Participation (8 Eligible)</h4>
+              <div class="radial-participation-box">
+                <div class="participation-ring-stat">
+                  <span class="participation-number" id="stats-ballots-count">2</span>
+                  <span class="participation-total">/ 8 Voted</span>
+                </div>
+                <div class="participation-bar-outer">
+                  <div class="participation-bar-inner" id="stats-ballots-bar" style="width: 25%;"></div>
+                </div>
+                <p class="participation-explainer" id="stats-participation-explainer">Waiting for remaining participants before aggregate reveal.</p>
+              </div>
+
+              <!-- Tally Display -->
+              <div id="tally-results-container" class="tally-results-box hidden">
+                <h5>Official Peer Recognition Tally (Revealed)</h5>
+                <div class="tally-bars-stack" id="tally-bars-display"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 5: CALENDAR & MEETINGS -->
+        <!-- ======================================================== -->
+        <section id="view-calendar" class="workspace-view">
+          
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Team Calendar &amp; Meetings</h2>
+              <p class="view-subtitle">Sprint milestones, delivery deadlines, and meeting room access</p>
+            </div>
+            <button class="btn btn-filled" id="btn-open-calendar-modal">+ Schedule Event</button>
+          </div>
+
+          <!-- Meeting Bridges Overview Panel -->
+          <div class="card meeting-bridges-panel" style="margin-bottom: 20px;">
+            <div class="col-header" style="margin-bottom: 14px;">
+              <div>
+                <h4 style="font-size: 14px; font-weight: 600; color: var(--text-primary);">Secure Meeting Bridges</h4>
+                <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">6 pre-allocated meeting bridges. The platform automatically juggles between these secure links so raw meeting URLs remain masked and managed.</p>
+              </div>
+              <span class="kpi-tag tag-green">6 Slots Available</span>
+            </div>
+            <div class="bridges-grid" id="meeting-bridges-container">
+              <!-- Dynamically populated -->
+            </div>
+          </div>
+
+          <div class="calendar-workspace-grid">
+            <div class="card">
+              <h4 class="card-title">Scheduled Deadlines &amp; Meetings</h4>
+              <p class="card-desc">Scheduled by Team Lead. Visible across personal and team dashboards.</p>
+              <div class="calendar-events-grid" id="calendar-all-events-container">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 6: 2-MAN GOVERNANCE -->
+        <!-- ======================================================== -->
+        <section id="view-governance" class="workspace-view">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Two-Man Rule Access Governance</h2>
+              <p class="view-subtitle">Privileged infrastructure operations require independent peer review and temporary auto-expiring capabilities</p>
+            </div>
+            <button class="btn btn-filled" id="btn-open-ticket-modal">+ Request Privileged Access</button>
+          </div>
+
+          <div class="policy-flowcard card">
+            <div class="flow-step">
+              <div class="flow-icon">1</div>
+              <div class="flow-text">
+                <strong>Member Raises Ticket</strong>
+                <span>Scope, justification, and duration</span>
+              </div>
+            </div>
+            <div class="flow-arrow">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </div>
+            <div class="flow-step">
+              <div class="flow-icon">2</div>
+              <div class="flow-text">
+                <strong>Peer Reviews &amp; Approves</strong>
+                <span class="highlight-rule">Requesters cannot self-approve</span>
+              </div>
+            </div>
+            <div class="flow-arrow">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+            </div>
+            <div class="flow-step">
+              <div class="flow-icon">3</div>
+              <div class="flow-text">
+                <strong>Ephemeral Grant Active</strong>
+                <span>Auto-expires after requested duration</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="tickets-pipeline" id="governance-tickets-container"></div>
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 7: TEAM DIRECTORY -->
+        <!-- ======================================================== -->
+        <section id="view-team" class="workspace-view">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Frontier AI Engineering Team Directory</h2>
+              <p class="view-subtitle">8 Allowlisted Members: 1 Designated Host + 7 Team Participants</p>
+            </div>
+            <span class="status-pill pill-purple">Allowlist Active</span>
+          </div>
+          <div class="team-roster-grid" id="team-roster-cards"></div>
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 8: AUDIT TRAIL -->
+        <!-- ======================================================== -->
+        <section id="view-audit" class="workspace-view">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">Tamper-Evident Security Audit Log</h2>
+              <p class="view-subtitle">Chronological ledger of logins, task allotments, deliverable submissions, and peer votes</p>
+            </div>
+            <div class="header-action-group">
+              <input type="text" id="audit-filter-input" class="table-search" placeholder="Filter by actor, action, or target...">
+              <button class="btn btn-outlined" id="btn-refresh-audit">Refresh Log</button>
+            </div>
+          </div>
+          <div class="table-surface card">
+            <table class="workspace-table">
+              <thead>
+                <tr>
+                  <th style="width: 70px;">Seq</th>
+                  <th style="width: 120px;">Time</th>
+                  <th style="width: 140px;">Actor</th>
+                  <th style="width: 170px;">Action</th>
+                  <th style="width: 160px;">Target</th>
+                  <th>Details</th>
+                  <th style="width: 110px;">Status</th>
+                </tr>
+              </thead>
+              <tbody id="audit-table-body"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- VIEW 9: ₹0 BACKUP -->
+        <!-- ======================================================== -->
+        <section id="view-recovery" class="workspace-view">
+          <div class="view-header">
+            <div>
+              <h2 class="view-title">₹0 Git Backup &amp; Disaster Recovery</h2>
+              <p class="view-subtitle">Sanitized JSON snapshot exporter for automated Git commits</p>
+            </div>
+            <button class="btn btn-filled" id="btn-trigger-backup-snap">Trigger Backup Snapshot Now</button>
+          </div>
+          <div class="recovery-grid">
+            <div class="recovery-card card">
+              <h3 class="card-title">Live Architecture Assessment</h3>
+              <p class="card-desc">Exports a sanitized JSON snapshot of all database tables to the local <code style="font-family: var(--font-mono); font-size: 11.5px; color: var(--google-amber);">backups/</code> directory. <strong style="color: var(--google-amber);">Local snapshot only</strong> — to use as a real backup, commit the generated file to a private repository.</p>
+            </div>
+            <div class="recovery-card card">
+              <h3 class="card-title">Snapshot Export Terminal</h3>
+              <div class="terminal-box" id="backup-terminal-output">
+                <code>Ready to trigger backup snapshot... Click above to execute.</code>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </main>
+
+    </div>
+  </div>
+
+  <!-- MODAL: ASSIGN TASK (HOST ONLY) -->
+  <dialog id="modal-task" class="workspace-dialog">
+    <div class="dialog-box">
+      <div class="dialog-header">
+        <div>
+          <h3>Assign Sprint Task</h3>
+          <p id="modal-task-host-notice">Assign a task to a team member with a target deadline.</p>
+        </div>
+        <button class="btn-icon btn-close-modal" id="btn-close-task-modal">&times;</button>
+      </div>
+      <form id="form-create-task" class="dialog-form">
+        <div class="form-field">
+          <label for="task-title">Task Title</label>
+          <input type="text" id="task-title" required placeholder="e.g. Implement Cloudflare D1 Migration Script" class="input-text">
+        </div>
+        <div class="form-field">
+          <label for="task-desc">Description</label>
+          <textarea id="task-desc" rows="3" placeholder="Technical criteria and scope..." class="input-textarea"></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="task-track">Engineering Track</label>
+            <select id="task-track" class="input-select">
+              <option value="backend">Backend Track</option>
+              <option value="frontend">Frontend Track</option>
+              <option value="lead">System &amp; Lead</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="task-assignee">Assignee</label>
+            <select id="task-assignee" class="input-select"></select>
+          </div>
+        </div>
+        <div class="form-field">
+          <label for="task-deadline">Target Deadline</label>
+          <input type="date" id="task-deadline" value="2026-10-25" class="input-text">
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-outlined" id="btn-cancel-task">Cancel</button>
+          <button type="submit" class="btn btn-filled">Assign Task</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- MODAL: SUBMIT DELIVERABLE (PARTICIPANT) -->
+  <dialog id="modal-submit-deliverable" class="workspace-dialog">
+    <div class="dialog-box">
+      <div class="dialog-header">
+        <div>
+          <h3>Submit Completed Deliverable</h3>
+          <p>Attach your GitHub Pull Request link and implementation notes.</p>
+        </div>
+        <button class="btn-icon btn-close-modal" id="btn-close-submit-modal">&times;</button>
+      </div>
+      <form id="form-submit-deliverable" class="dialog-form">
+        <div class="form-field">
+          <label for="submit-task-select">Select Your Allocated Task</label>
+          <select id="submit-task-select" class="input-select" required></select>
+        </div>
+        <div class="form-field">
+          <label for="submit-pr-url">Deliverable URL (GitHub PR / Commit / Doc)</label>
+          <input type="url" id="submit-pr-url" required placeholder="https://github.com/frontier-ai/.../pull/18" class="input-text">
+        </div>
+        <div class="form-field">
+          <label for="submit-notes">Implementation Notes</label>
+          <textarea id="submit-notes" rows="3" placeholder="Summary of changes, test results, and verification..." class="input-textarea"></textarea>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-outlined" id="btn-cancel-submit">Cancel</button>
+          <button type="submit" class="btn btn-filled">Submit &amp; Complete</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- MODAL: SCHEDULE CALENDAR MEETING / DEADLINE -->
+  <dialog id="modal-calendar" class="workspace-dialog">
+    <div class="dialog-box" style="max-width: 540px;">
+      <div class="dialog-header">
+        <div>
+          <h3>Schedule Meeting or Deadline</h3>
+          <p>Name the session, select attendees, and assign or auto-juggle meeting links.</p>
+        </div>
+        <button class="btn-icon btn-close-modal" id="btn-close-cal-modal">&times;</button>
+      </div>
+      <form id="form-create-calendar" class="dialog-form">
+        <div class="form-field">
+          <label for="cal-title">Meeting or Milestone Title</label>
+          <input type="text" id="cal-title" required placeholder="e.g. Sprint 2 Architecture Deep-Dive" class="input-text">
+        </div>
+        <div class="form-field">
+          <label for="cal-desc">Agenda / Context (Optional)</label>
+          <textarea id="cal-desc" rows="2" placeholder="Brief agenda or notes for attendees..." class="input-text" style="resize: vertical; font-family: inherit; font-size: 13px;"></textarea>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="cal-type">Event Type</label>
+            <select id="cal-type" class="input-select">
+              <option value="MEETING">Team Meeting</option>
+              <option value="DEADLINE">Hard Deadline</option>
+              <option value="RETRO">Retrospective / Review</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="cal-date">Date</label>
+            <input type="date" id="cal-date" required class="input-text">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="cal-time">Time</label>
+            <input type="text" id="cal-time" value="11:00 AM IST" required class="input-text">
+          </div>
+          <div class="form-field">
+            <label for="cal-audience-select">Target Audience / Recipients</label>
+            <select id="cal-audience-select" class="input-select">
+              <option value="ALL">All Team Members (8 members)</option>
+              <option value="BACKEND">Backend Track Only (3 members)</option>
+              <option value="FRONTEND">Frontend Track Only (3 members)</option>
+              <option value="CUSTOM">Specific Members (Select)</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Custom Member Selection Checkboxes (shown when CUSTOM selected) -->
+        <div id="cal-custom-members-box" class="form-field" style="display: none; background: var(--bg-surface-elevated); padding: 12px; border-radius: 8px; border: 1px solid var(--border-subtle);">
+          <label style="margin-bottom: 8px; display: block; font-size: 12px; color: var(--text-secondary);">Select Target Members:</label>
+          <div id="cal-member-checkboxes" style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+            <!-- Dynamically populated from members -->
+          </div>
+        </div>
+
+        <!-- Meeting Slot Allocation (Auto-juggle between the 6 links or manual slot) -->
+        <div class="form-field" id="cal-slot-field">
+          <label for="cal-slot-select">Meeting Bridge Allocation</label>
+          <select id="cal-slot-select" class="input-select">
+            <option value="auto">Auto-Juggle Link (Rotates through 6 secure links)</option>
+            <option value="1">Meeting Bridge 1</option>
+            <option value="2">Meeting Bridge 2</option>
+            <option value="3">Meeting Bridge 3</option>
+            <option value="4">Meeting Bridge 4</option>
+            <option value="5">Meeting Bridge 5</option>
+            <option value="6">Meeting Bridge 6</option>
+            <option value="custom">Manual Custom Link</option>
+          </select>
+          <span style="font-size: 11.5px; color: var(--text-muted); margin-top: 4px; display: block;">
+            The actual meeting URL is held securely on the server and masked behind an internal join gateway.
+          </span>
+        </div>
+
+        <div class="form-field" id="cal-custom-link-box" style="display: none;">
+          <label for="cal-link">Custom Meeting URL</label>
+          <input type="url" id="cal-link" placeholder="https://meet.google.com/..." class="input-text">
+        </div>
+
+        <!-- Broadcast Immediate Ping Option -->
+        <div class="form-field" style="margin-top: 4px;">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--text-primary);">
+            <input type="checkbox" id="cal-ping-now" style="width: 16px; height: 16px; accent-color: var(--google-blue);">
+            <span>Broadcast Immediate Ping (Flags as Live Session and alerts recipients immediately)</span>
+          </label>
+        </div>
+
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-outlined" id="btn-cancel-cal">Cancel</button>
+          <button type="submit" class="btn btn-filled">Schedule Event</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- MODAL: REQUEST ACCESS TICKET -->
+  <dialog id="modal-ticket" class="workspace-dialog">
+    <div class="dialog-box">
+      <div class="dialog-header">
+        <h3>Request Privileged Access (2-Man Rule)</h3>
+        <button class="btn-icon btn-close-modal" id="btn-close-ticket-modal">&times;</button>
+      </div>
+      <form id="form-create-ticket" class="dialog-form">
+        <div class="form-field">
+          <label for="ticket-title">Operation Title</label>
+          <input type="text" id="ticket-title" required placeholder="e.g. Production Database Index Alteration" class="input-text">
+        </div>
+        <div class="form-row">
+          <div class="form-field">
+            <label for="ticket-scope">Permission Scope</label>
+            <select id="ticket-scope" class="input-select">
+              <option value="db:migrate">db:migrate (Schema Alterations)</option>
+              <option value="db:snapshot_export">db:snapshot_export (Full Data Dump)</option>
+              <option value="security:allowlist_mutation">security:allowlist_mutation (Add/Remove Members)</option>
+              <option value="infra:emergency_shutdown">infra:emergency_shutdown (System Halt)</option>
+            </select>
+          </div>
+          <div class="form-field">
+            <label for="ticket-duration">Grant Duration</label>
+            <select id="ticket-duration" class="input-select">
+              <option value="15">15 Minutes</option>
+              <option value="30" selected>30 Minutes</option>
+              <option value="60">60 Minutes</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-field">
+          <label for="ticket-reason">Justification &amp; Risk Assessment</label>
+          <textarea id="ticket-reason" required rows="3" placeholder="Explain why elevated access is required..." class="input-textarea"></textarea>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-outlined" id="btn-cancel-ticket">Cancel</button>
+          <button type="submit" class="btn btn-filled">Submit for Peer Review</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- MODAL: OCC CONFLICT VISUAL INSPECTOR -->
+  <dialog id="modal-occ-conflict" class="workspace-dialog">
+    <div class="dialog-box modal-large">
+      <div class="dialog-header">
+        <div class="header-danger-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+        </div>
+        <div>
+          <h3>Optimistic Concurrency Conflict Detected</h3>
+          <p>Another team member modified this task while you were reviewing it.</p>
+        </div>
+        <button class="btn-icon btn-close-modal" id="btn-close-occ-modal">&times;</button>
+      </div>
+      <div class="occ-diff-grid">
+        <div class="occ-diff-pane pane-server">
+          <h4>Server Database State (Current)</h4>
+          <div class="diff-property"><strong>Version:</strong> <span id="occ-server-version">v2</span></div>
+          <div class="diff-property"><strong>Status:</strong> <span id="occ-server-status">COMPLETED</span></div>
+        </div>
+        <div class="occ-diff-pane pane-local">
+          <h4>Your Stale Submission (Rejected)</h4>
+          <div class="diff-property"><strong>Your Version:</strong> <span id="occ-client-version">v1 (Stale)</span></div>
+          <div class="diff-property"><strong>Attempted Status:</strong> <span id="occ-client-status">IN PROGRESS</span></div>
+        </div>
+      </div>
+      <div class="dialog-actions">
+        <button type="button" class="btn btn-filled" id="btn-resolve-occ">Reload Latest Task State</button>
+      </div>
+    </div>
+  </dialog>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

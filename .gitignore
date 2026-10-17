@@ -1,0 +1,26 @@
+# Environment variables
+.env
+.env.local
+
+# Node dependencies
+node_modules/
+npm-debug.log*
+
+# Database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Local backup snapshots (keep directory via .gitkeep)
+backups/*.json
+!backups/.gitkeep
+
+# OS & Editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs
+*.log
