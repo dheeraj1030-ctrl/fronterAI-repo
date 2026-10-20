@@ -108,6 +108,16 @@ export function initDatabase() {
       FOREIGN KEY (option_id) REFERENCES voting_options (id)
     );
 
+    -- Persistent User Authentication Sessions
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      member_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY (member_id) REFERENCES members (id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token);
+
     -- 2-Man Rule Access-Request Tickets
     CREATE TABLE IF NOT EXISTS access_tickets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +144,20 @@ export function initDatabase() {
       target TEXT NOT NULL,
       details TEXT,
       status TEXT NOT NULL
+    );
+
+    -- Peer-to-Peer Tasklets (Member-to-Member informal micro-tasks)
+    CREATE TABLE IF NOT EXISTS tasklets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sender_id INTEGER NOT NULL,
+      receiver_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING', -- 'PENDING', 'ACCEPTED', 'DONE'
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (sender_id) REFERENCES members (id),
+      FOREIGN KEY (receiver_id) REFERENCES members (id)
     );
   `);
 
@@ -179,6 +203,7 @@ export function seedMeetingSlots() {
 export function seedData() {
   // Clear old seed if re-running (delete child tables before parent tables)
   db.exec(`
+    DELETE FROM tasklets;
     DELETE FROM ballots;
     DELETE FROM used_tokens;
     DELETE FROM voting_eligibility;
@@ -388,7 +413,65 @@ export function seedData() {
       (1, 6, 'Fiona Gallagher — UX Usability Auditing & Test Coverage'),
       (1, 7, 'Grace Hopper — Systems Architecture & Independent Code Reviews'),
       (1, 8, 'Henry Ford — Platform Resilience & Automated Git Disaster Recovery');
+
+    -- Template 2: Project Quality Review
+    INSERT INTO voting_sessions (id, title, description, session_type, status, total_eligible, created_by, created_at)
+    VALUES (
+      2,
+      'Sprint 1 Project & Codebase Quality Review',
+      'Rate the overall Sprint 1 outcome: architecture cleanliness, documentation integrity, zero-budget cloud readiness, and prototype completeness.',
+      'PROJECT',
+      'ACTIVE',
+      8,
+      1,
+      '${new Date().toISOString()}'
+    );
+
+    INSERT INTO voting_options (session_id, candidate_member_id, label) VALUES
+      (2, NULL, '5 Stars — Outstanding (Clean architecture, robust Zero-$ budget prototype)'),
+      (2, NULL, '4 Stars — Strong Execution (Minor polishing remaining)'),
+      (2, NULL, '3 Stars — Acceptable Baseline (Core requirements verified)'),
+      (2, NULL, '2 Stars — Needs Refactoring (Tech debt to address in Sprint 2)'),
+      (2, NULL, '1 Star — Critical Blockers Unresolved');
   `);
+
+  // Seed sample tasklets between members
+  const insertTasklet = db.prepare(`
+    INSERT INTO tasklets (sender_id, receiver_id, title, description, status, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `);
+  const sampleTasklets = [
+    [
+      2, // Bob
+      4, // Dana
+      'Review mobile navigation drawer CSS',
+      'Check if the sidebar collapse transition works cleanly on Android mobile screens.',
+      'PENDING',
+      new Date(Date.now() - 3600000).toISOString(),
+      new Date(Date.now() - 3600000).toISOString()
+    ],
+    [
+      3, // Charlie
+      5, // Ethan
+      'Check SQLite WAL mode configuration',
+      'Verify if PRAGMA synchronous=NORMAL and WAL mode are optimal for Cloudflare D1 local simulation.',
+      'ACCEPTED',
+      new Date(Date.now() - 7200000).toISOString(),
+      new Date(Date.now() - 7200000).toISOString()
+    ],
+    [
+      6, // Fiona
+      2, // Bob
+      'Verify color hue contrast for status dots',
+      'Check that green and yellow state dots meet accessibility guidelines against dark surface backgrounds.',
+      'DONE',
+      new Date(Date.now() - 14400000).toISOString(),
+      new Date(Date.now() - 14400000).toISOString()
+    ]
+  ];
+  for (const t of sampleTasklets) {
+    insertTasklet.run(...t);
+  }
 
   // Seed access tickets
   db.exec(`
