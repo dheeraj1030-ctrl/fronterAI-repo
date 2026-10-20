@@ -1285,6 +1285,19 @@ function renderTeamRoster() {
   if (!container) return;
   container.innerHTML = '';
 
+  const subtitle = document.getElementById('team-roster-subtitle');
+  if (subtitle) {
+    const memberCount = state.members ? state.members.length : 0;
+    subtitle.textContent = `${memberCount} Allowlisted Member${memberCount === 1 ? '' : 's'}: 1 Designated Host + ${Math.max(0, memberCount - 1)} Team Participant${memberCount === 2 ? '' : 's'}`;
+  }
+
+  const teamBadge = document.querySelector('[data-view="view-team"] .nav-badge');
+  if (teamBadge && state.members) {
+    teamBadge.textContent = state.members.length;
+  }
+
+  const isHost = state.currentUser && state.currentUser.is_host === 1;
+
   state.members.forEach(m => {
     const card = document.createElement('div');
     card.className = 'roster-card';
@@ -1293,7 +1306,7 @@ function renderTeamRoster() {
     if (m.team_track === 'frontend') avatarColor = 'avatar-purple';
     if (m.team_track === 'lead') avatarColor = 'avatar-amber';
 
-    const assignedTasks = state.tasks.filter(t => t.assignee_id === m.id).length;
+    const assignedTasks = (state.tasks || []).filter(t => t.assignee_id === m.id).length;
 
     card.innerHTML = `
       <div class="roster-card-header">
@@ -1319,13 +1332,37 @@ function renderTeamRoster() {
         </div>
       </div>
 
-      <button class="btn btn-outlined btn-sm btn-roster-switch" data-id="${m.github_numeric_id}">
-        Switch to Persona
-      </button>
+      <div style="display: flex; gap: 8px; margin-top: 12px;">
+        <button class="btn btn-outlined btn-sm btn-roster-switch" data-id="${m.github_numeric_id}" style="flex: 1;">
+          Switch Persona
+        </button>
+        ${isHost && !m.is_host ? `
+          <button class="btn btn-danger btn-sm btn-remove-member" data-id="${m.id}" title="Remove member from allowlist">
+            Remove
+          </button>
+        ` : ''}
+      </div>
     `;
 
-    card.querySelector('.btn-roster-switch').addEventListener('click', async () => {
+    card.querySelector('.btn-roster-switch')?.addEventListener('click', async () => {
       await loginAs(m.github_numeric_id);
+    });
+
+    card.querySelector('.btn-remove-member')?.addEventListener('click', async () => {
+      if (!confirm(`Are you sure you want to remove @${m.handle} from the Frontier AI allowlist?`)) return;
+      try {
+        const res = await fetch(`/api/members/${m.id}`, { method: 'DELETE' });
+        const data = await res.json();
+        if (res.ok) {
+          showToast(data.message || 'Member removed');
+          await loadMembers();
+          renderTeamRoster();
+        } else {
+          showToast(data.error || 'Failed to remove member', true);
+        }
+      } catch (err) {
+        showToast('Network error removing member', true);
+      }
     });
 
     container.appendChild(card);
@@ -1522,6 +1559,59 @@ function setupModals() {
   document.getElementById('btn-resolve-occ')?.addEventListener('click', async () => {
     occModal.close();
     await loadTasks();
+  });
+
+  // Onboard Member modal (Host only)
+  const onboardModal = document.getElementById('modal-onboard-member');
+  document.getElementById('btn-open-onboard-modal')?.addEventListener('click', () => {
+    if (!state.currentUser || !state.currentUser.is_host) {
+      showToast('Host Authorization Required: Only the Team Host can onboard members.', true);
+      return;
+    }
+    onboardModal.showModal();
+  });
+  document.getElementById('btn-close-onboard-modal')?.addEventListener('click', () => onboardModal.close());
+  document.getElementById('btn-cancel-onboard')?.addEventListener('click', () => onboardModal.close());
+
+  document.getElementById('form-onboard-member')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const github_username = document.getElementById('onboard-github-user').value.trim();
+    const role = document.getElementById('onboard-role').value.trim();
+    const team_track = document.getElementById('onboard-track').value;
+    const submitBtn = document.getElementById('btn-submit-onboard');
+
+    if (!github_username || !role) {
+      showToast('Please enter both username and role.', true);
+      return;
+    }
+
+    const originalText = submitBtn.textContent;
+    submitBtn.textContent = 'Verifying with GitHub...';
+    submitBtn.disabled = true;
+
+    try {
+      const res = await fetch('/api/members', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ github_username, role, team_track })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Failed to onboard member', true);
+        return;
+      }
+      showToast(data.message || 'Member successfully onboarded!');
+      onboardModal.close();
+      document.getElementById('form-onboard-member').reset();
+      await loadMembers();
+      renderTeamRoster();
+      populateTaskAssigneeDropdown();
+    } catch (err) {
+      showToast('Network error onboarding member', true);
+    } finally {
+      submitBtn.textContent = originalText;
+      submitBtn.disabled = false;
+    }
   });
 
   // Create Task Form (Lead only)

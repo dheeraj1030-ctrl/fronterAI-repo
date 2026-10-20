@@ -721,9 +721,12 @@
           <div class="view-header">
             <div>
               <h2 class="view-title">Frontier AI Engineering Team Directory</h2>
-              <p class="view-subtitle">8 Allowlisted Members: 1 Designated Host + 7 Team Participants</p>
+              <p class="view-subtitle" id="team-roster-subtitle">Allowlisted Members: 1 Designated Host + Active Participants</p>
             </div>
-            <span class="status-pill pill-purple">Allowlist Active</span>
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span class="status-pill pill-purple">Allowlist Active</span>
+              <button class="btn btn-filled host-only-action" id="btn-open-onboard-modal">+ Onboard Member</button>
+            </div>
           </div>
           <div class="team-roster-grid" id="team-roster-cards"></div>
         </section>
@@ -1033,6 +1036,42 @@
       <div class="dialog-actions">
         <button type="button" class="btn btn-filled" id="btn-resolve-occ">Reload Latest Task State</button>
       </div>
+    </div>
+  </dialog>
+
+  <!-- Modal: Onboard New Team Member -->
+  <dialog id="modal-onboard-member" class="workspace-dialog">
+    <div class="dialog-box" style="max-width: 500px;">
+      <div class="dialog-header">
+        <div>
+          <h3>Onboard Team Member</h3>
+          <p>Add a developer to the Frontier AI allowlist using their GitHub handle.</p>
+        </div>
+        <button class="btn-icon btn-close-modal" id="btn-close-onboard-modal">&times;</button>
+      </div>
+      <form id="form-onboard-member" class="dialog-form">
+        <div class="form-field">
+          <label for="onboard-github-user">GitHub Username</label>
+          <input type="text" id="onboard-github-user" required placeholder="e.g. torvalds (without @)" class="input-text" autocomplete="off">
+          <small style="color: var(--text-muted); font-size: 11.5px; margin-top: 4px; display: block;">The system queries GitHub to verify their profile and retrieve their immutable numeric ID.</small>
+        </div>
+        <div class="form-field">
+          <label for="onboard-role">Team Role</label>
+          <input type="text" id="onboard-role" required placeholder="e.g. Frontend Engineer, Backend Specialist, QA Reviewer" class="input-text">
+        </div>
+        <div class="form-field">
+          <label for="onboard-track">Engineering Track</label>
+          <select id="onboard-track" class="input-select">
+            <option value="frontend">Frontend Track</option>
+            <option value="backend">Backend Track</option>
+            <option value="lead">Architecture & Lead Track</option>
+          </select>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-secondary" id="btn-cancel-onboard">Cancel</button>
+          <button type="submit" class="btn btn-filled" id="btn-submit-onboard">Verify & Enroll Member</button>
+        </div>
+      </form>
     </div>
   </dialog>
 

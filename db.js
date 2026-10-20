@@ -198,17 +198,9 @@ export function seedData() {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
-  // ONLY 1 INDIVIDUAL IS THE HOST: Alice Vance (id: 1, is_host: 1)
-  // All other 7 are Participants (is_host: 0)
+  // Sole authorized member: Kartikay (@potatobun321) as Team Host & Lead
   const members = [
-    [1, 10101, 'alice_v', 'Alice Vance', 'Team Host & Lead', 'backend', 1, 1], // THE SOLE AUTHORIZED HOST
-    [2, 10102, 'bob_r', 'Bob Ross', 'Frontend Engineer', 'frontend', 0, 1],
-    [3, 10103, 'charlie_p', 'Charlie Park', 'Backend Engineer', 'backend', 0, 1],
-    [4, 10104, 'dana_s', 'Dana Scully', 'Frontend Engineer', 'frontend', 0, 1],
-    [5, 10105, 'ethan_h', 'Ethan Hunt', 'Security Engineer', 'backend', 0, 1],
-    [6, 10106, 'fiona_g', 'Fiona Gallagher', 'UX & QA Engineer', 'frontend', 0, 1],
-    [7, 10107, 'grace_h', 'Grace Hopper', 'Systems Reviewer', 'lead', 0, 1],
-    [8, 10108, 'henry_f', 'Henry Ford', 'Platform Operations', 'lead', 0, 1]
+    [1, 194890859, 'potatobun321', 'Kartikay', 'Team Host & Lead', 'lead', 1, 1]
   ];
 
   for (const m of members) {
@@ -223,74 +215,14 @@ export function seedData() {
 
   const tasks = [
     [
-      'Design Blind Anonymous Ballot Token Protocol',
-      'Implement HMAC token separation between voter identity and ballot payload to prevent small-team correlation leaks.',
-      'backend',
-      5, // Ethan
-      'COMPLETED',
-      '2026-10-18',
-      'https://github.com/frontier-ai/specs/pull/12',
-      'HMAC token blinding verified. Ready for performance peer review.',
-      1,
-      new Date(Date.now() - 86400000).toISOString()
-    ],
-    [
-      'Build High-Contrast Google Workspace Style UI',
-      'Deliver segmented views: Personal dashboard, global team view, and calendar ping widgets.',
-      'frontend',
-      2, // Bob
-      'IN_PROGRESS',
-      '2026-10-19',
-      'https://github.com/frontier-ai/web/pull/18',
-      'Layout segmented. Working on calendar countdown chips.',
-      1,
-      new Date().toISOString()
-    ],
-    [
-      'Optimistic Concurrency Control in SQLite Engine',
-      'Enforce version-check gating on task update APIs to gracefully reject conflicting simultaneous edits.',
-      'backend',
-      3, // Charlie
-      'COMPLETED',
-      '2026-10-17',
-      'https://github.com/frontier-ai/api/pull/21',
-      'OCC tests passing 100%.',
-      1,
-      new Date().toISOString()
-    ],
-    [
-      'Client-Side Deliverables & PR Submissions',
-      'Support attaching PR links, GitHub commits, and design documents directly to tasks.',
-      'frontend',
-      4, // Dana
-      'TODO',
-      '2026-10-21',
-      '',
-      '',
-      1,
-      new Date().toISOString()
-    ],
-    [
-      'Two-Man Rule Ephemeral Capability Grant Flow',
-      'Block self-approval on privileged access requests. Require distinct second peer approval before issuing ephemeral grants.',
-      'backend',
-      1, // Alice
-      'IN_PROGRESS',
-      '2026-10-20',
-      '',
-      '',
-      1,
-      new Date().toISOString()
-    ],
-    [
-      'Automated ₹0 Disaster Recovery Snapshot Exporter',
-      'Periodic export of sanitized database state to private repository backups without runtime locking.',
+      'Initialize Frontier AI Workspace & Onboard Core Team',
+      'Authorize core engineering members via GitHub allowlist, configure meeting bridges, and establish sprint deliverables.',
       'lead',
-      8, // Henry
-      'TODO',
-      '2026-10-22',
-      '',
-      '',
+      1, // Kartikay
+      'IN_PROGRESS',
+      new Date(Date.now() + 86400000 * 5).toISOString().split('T')[0],
+      'https://github.com/potatobun321/fronterAI-repo',
+      'Real GitHub OAuth 2.0 and strict allowlist gating verified and live.',
       1,
       new Date().toISOString()
     ]
@@ -308,54 +240,15 @@ export function seedData() {
 
   const events = [
     [
-      'Sprint 1 Mid-Point Architecture Sync',
-      'Technical architecture alignment across frontend and backend tracks.',
+      'Sprint Architecture & Onboarding Sync',
+      'Team kickoff sync to review roadmap, onboard engineers, and establish review milestones.',
       'MEETING',
-      '2026-10-16',
-      '10:00 AM IST',
+      new Date().toISOString().split('T')[0],
+      '11:00 AM IST',
       'ALL',
-      null, // Team-wide
+      null,
       1,
       'https://meet.google.com/kuw-amav-swf',
-      0,
-      1
-    ],
-    [
-      'Charlie Park: Concurrency PR Code Freeze',
-      'Final code freeze deadline for optimistic concurrency control pull request.',
-      'DEADLINE',
-      '2026-10-17',
-      '06:00 PM IST',
-      'BACKEND',
-      3, // Charlie
-      null,
-      null,
-      0,
-      1
-    ],
-    [
-      'Ethan Hunt: Cryptographic Protocol Review',
-      'Independent security review of blind HMAC token generation logic.',
-      'DEADLINE',
-      '2026-10-18',
-      '11:59 PM IST',
-      'BACKEND',
-      5, // Ethan
-      null,
-      null,
-      0,
-      1
-    ],
-    [
-      'Frontier AI All-Hands: Sprint 1 Peer Review & MVP Vote',
-      'Sprint retrospective, review of deliverables, and anonymous peer impact voting.',
-      'RETRO',
-      '2026-10-20',
-      '04:30 PM IST',
-      'ALL',
-      null, // Team-wide
-      2,
-      'https://meet.google.com/mzs-atxy-yja',
       0,
       1
     ]
@@ -365,58 +258,16 @@ export function seedData() {
     insertCal.run(...ev);
   }
 
-  // Seed Anonymous Peer Performance Voting Session hosted by Alice Vance
-  db.exec(`
-    INSERT INTO voting_sessions (id, title, description, session_type, status, total_eligible, created_by, created_at)
-    VALUES (
-      1,
-      'Sprint 1 Peer Performance & Impact Evaluation',
-      'Anonymous peer voting to recognize top engineering contribution, collaboration, and velocity in Sprint 1. Hosted by Team Lead. Your vote is 100% blind and unlinked.',
-      'PERFORMANCE',
-      'ACTIVE',
-      8,
-      1,
-      '${new Date().toISOString()}'
-    );
-
-    -- Candidates are the team members!
-    INSERT INTO voting_options (session_id, candidate_member_id, label) VALUES
-      (1, 2, 'Bob Ross — Frontend Velocity, Google Workspace Theme & UI Responsiveness'),
-      (1, 3, 'Charlie Park — Backend OCC Concurrency, Zero-Crash SQLite Handlers'),
-      (1, 4, 'Dana Scully — Client State Separation, Component Architecture & Tests'),
-      (1, 5, 'Ethan Hunt — Blind Token Protocol Design & Cryptographic Integrity'),
-      (1, 6, 'Fiona Gallagher — UX Usability Auditing & Test Coverage'),
-      (1, 7, 'Grace Hopper — Systems Architecture & Independent Code Reviews'),
-      (1, 8, 'Henry Ford — Platform Resilience & Automated Git Disaster Recovery');
-  `);
-
-  // Seed access tickets
-  db.exec(`
-    INSERT INTO access_tickets (requester_id, title, reason, scope, duration_minutes, status, approver_id, created_at, resolved_at, expires_at)
-    VALUES (
-      5,
-      'Add New Research Member to GitHub Allowlist',
-      'Onboarding external advisor with restricted read permissions.',
-      'security:allowlist_mutation',
-      45,
-      'PENDING_APPROVAL',
-      NULL,
-      '${new Date(Date.now() - 1200000).toISOString()}',
-      NULL,
-      NULL
-    );
-  `);
-
   // Log system initialization in audit
   db.prepare(`
     INSERT INTO audit_events (timestamp, actor_handle, action, target, details, status)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(
     new Date().toISOString(),
-    'alice_v',
+    'potatobun321',
     'INIT_PLATFORM',
     'governance',
-    'Frontier AI Platform initialized. Alice Vance designated as Team Host & Lead.',
+    'Frontier AI Platform initialized with clean slate. Kartikay designated as Team Host & Lead.',
     'SUCCESS'
   );
 }

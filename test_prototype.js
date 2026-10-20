@@ -28,6 +28,20 @@ async function runTests() {
     initDatabase();
     seedData();
 
+    // For automated test verification of multi-role gating, insert a test participant
+    db.prepare(`
+      INSERT OR REPLACE INTO members (id, github_numeric_id, handle, name, role, team_track, is_host, is_allowed)
+      VALUES (2, 10102, 'test_dev', 'Test Developer', 'Frontend Engineer', 'frontend', 0, 1)
+    `).run();
+
+    // Ensure test voting session exists for voting checks
+    db.exec(`
+      INSERT OR REPLACE INTO voting_sessions (id, title, description, session_type, status, total_eligible, created_by, created_at)
+      VALUES (1, 'Test Peer Voting', 'Testing anonymous ballot box', 'PERFORMANCE', 'ACTIVE', 2, 1, datetime('now'));
+      INSERT OR REPLACE INTO voting_options (id, session_id, candidate_member_id, label)
+      VALUES (1, 1, 1, 'Kartikay');
+    `);
+
     // 1. Members
     const mRes = await testFetch(base + '/api/members');
     const mData = await mRes.json();
@@ -42,7 +56,7 @@ async function runTests() {
     });
     console.log(`[PASS] 2. Hard Allowlist: Unauthorized ID 9999 rejected with HTTP ${badLogin.status}`);
 
-    // 3. Switch to Participant Bob Ross (id: 2, is_host: 0)
+    // 3. Switch to Participant Test Dev (id: 2, is_host: 0)
     await testFetch(base + '/api/auth/login-as', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -65,11 +79,11 @@ async function runTests() {
     });
     console.log(`[PASS] 4. Calendar Gating: Participant meeting scheduling blocked with HTTP ${participantCal.status} (403 Forbidden)`);
 
-    // 4. Switch back to Authorized Host Alice Vance (id: 1, is_host: 1)
+    // 4. Switch back to Authorized Host Kartikay (id: 1, is_host: 1)
     await testFetch(base + '/api/auth/login-as', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ github_numeric_id: 10101 })
+      body: JSON.stringify({ github_numeric_id: 194890859 })
     });
 
     // Host allots task
@@ -80,7 +94,7 @@ async function runTests() {
         title: 'Review D1 Sharding Strategy',
         description: 'Verify query performance benchmarks',
         track: 'backend',
-        assignee_id: 3, // Charlie
+        assignee_id: 2, // Test Dev
         deadline: '2026-10-24'
       })
     });
@@ -188,11 +202,11 @@ async function runTests() {
     const blockedSnap = await testFetch(base + '/api/disaster-recovery/export', { method: 'POST' });
     console.log(`[PASS] 12a. Disaster Recovery Gating: Participant blocked from export with HTTP ${blockedSnap.status} (403 Forbidden)`);
 
-    // Switch back to Alice Vance (Authorator)
+    // Switch back to Kartikay (Authorator)
     await testFetch(base + '/api/auth/login-as', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ github_numeric_id: 10101 })
+      body: JSON.stringify({ github_numeric_id: 194890859 })
     });
 
     const snapRes = await testFetch(base + '/api/disaster-recovery/export', { method: 'POST' });
