@@ -1,0 +1,29 @@
+# Frontier AI — Technical Documentation Suite
+
+Welcome to the Frontier AI technical documentation suite. This documentation provides an in-depth breakdown of the architecture, security mechanisms, task engines, cryptographic protocols, meeting infrastructure, and deployment roadmap.
+
+---
+
+## Documentation Index
+
+| Document | Title | Description |
+|---|---|---|
+| [**01. Architecture Overview**](01_ARCHITECTURE_OVERVIEW.md) | System Architecture & Design Philosophy | High-level system diagram, the zero-cost (₹0 budget) rationale, the zero npm dependencies mandate, and component directory structure. |
+| [**02. Authentication & Security**](02_AUTHENTICATION_SECURITY.md) | Authentication, Sessions & Security Architecture | Immutable numeric GitHub ID allowlist, persistent SQLite sessions, role-based access control (Lead vs. Member), two-person rule governance ("Four-Eyes Principle"), and security audit logs. |
+| [**03. Tasks & Peer Tasklets**](03_TASKS_AND_TASKLETS.md) | Task Assignment & Peer Tasklet Engine | Dual task paradigm: formal sprint deliverables with Optimistic Concurrency Control (OCC) vs. informal peer-to-peer micro-tasks ("tasklets") with state machine transitions. Sized Kanban board layout. |
+| [**04. Cryptographic Peer Review**](04_CRYPTOGRAPHIC_PEER_REVIEW.md) | Cryptographic Peer Review & Evaluation Protocol | The Two-Phase Blind Ballot Protocol using HMAC-SHA256, unlinked token decoupling, double-voting prevention, the 2 evaluation templates (Peer Performance & Project Quality), and client token caching. |
+| [**05. Call Room & Google Meet Gateway**](05_CALL_ROOM_AND_EMBEDDED_MEET.md) | Call Room & Google Meet Gateway Architecture | 6-slot Google Meet rotation engine, masked gateway redirect with attendance verification, dynamic status indicator hues (live green, scheduled amber, idle blue), clean collapsed sidebar circle state, and the Path A companion gateway model. |
+| [**06. Deployment & Cloudflare Guide**](06_DEPLOYMENT_AND_MIGRATION_GUIDE.md) | Deployment & Cloudflare Migration Guide | Step-by-step instructions to migrate from localhost Node.js + SQLite to Cloudflare Pages + Workers + D1, staying 100% within the permanent ₹0 free tier. |
+| [**Presentation Speaker Script**](PRESENTATION_SPEAKER_SCRIPT.md) | Speaker Script & Demo Walkthrough Guide | Word-for-word spoken walkthrough, scene-by-scene demo cues, and answers to tough technical questions for the live presentation. |
+
+---
+
+## Quick Reference: Running the System
+
+```bash
+# 1. Start the local prototype server (runs at http://localhost:3030)
+npm start
+
+# 2. Run the 17-point automated verification & security test suite
+node test_prototype.js
+```

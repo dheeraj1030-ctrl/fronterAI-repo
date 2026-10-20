@@ -33,20 +33,50 @@ const PUBLIC_DIR = path.join(__dirname, 'public');
 // Initialize database & tables
 initDatabase();
 
-// Map-based session store: sessionToken → member object
-// Each login generates a cryptographically-random token sent as an HttpOnly cookie.
-// This prevents concurrent requests from sharing a single global user variable.
-const sessions = new Map();
-
+// Database-backed persistent session store
+// Sessions survive process restarts and are keyed by cryptographically random tokens.
 function generateSessionToken() {
   return crypto.randomBytes(32).toString('hex');
+}
+
+function createSession(member) {
+  const token = generateSessionToken();
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + 86400 * 1000).toISOString(); // 24 hours
+  db.prepare('INSERT INTO sessions (token, member_id, created_at, expires_at) VALUES (?, ?, ?, ?)').run(
+    token,
+    member.id,
+    createdAt,
+    expiresAt
+  );
+  return token;
 }
 
 function getSessionUser(req) {
   const cookies = parseCookies(req);
   const token = cookies.frontier_session;
   if (!token) return null;
-  return sessions.get(token) || null;
+  const now = new Date().toISOString();
+  const row = db.prepare(`
+    SELECT m.id, m.github_numeric_id, m.handle, m.name, m.role, m.team_track, m.is_host, m.is_allowed
+    FROM sessions s
+    JOIN members m ON s.member_id = m.id
+    WHERE s.token = ? AND s.expires_at > ?
+  `).get(token, now);
+  return row || null;
+}
+
+function destroySession(token) {
+  if (token) {
+    db.prepare('DELETE FROM sessions WHERE token = ?').run(token);
+  }
+}
+
+// Clean up expired sessions on startup
+try {
+  db.prepare('DELETE FROM sessions WHERE expires_at < ?').run(new Date().toISOString());
+} catch (e) {
+  // Graceful fallback if table is newly initialized
 }
 
 function parseCookies(req) {
@@ -104,7 +134,15 @@ const server = http.createServer(async (req, res) => {
     // API: AUTH & SESSIONS
     // -------------------------------------------------------------
     if (pathname === '/api/members' && method === 'GET') {
-      const members = db.prepare('SELECT id, github_numeric_id, handle, name, role, team_track, is_host, is_allowed FROM members').all();
+      const currentUser = getSessionUser(req);
+      let members;
+      if (currentUser && currentUser.is_host) {
+        // Full administrative member details for Host
+        members = db.prepare('SELECT id, github_numeric_id, handle, name, role, team_track, is_host, is_allowed FROM members').all();
+      } else {
+        // Public/member safe projection (omit sensitive github_numeric_id)
+        members = db.prepare('SELECT id, handle, name, role, team_track, is_host FROM members').all();
+      }
       return sendJson(res, 200, { members });
     }
 
@@ -288,8 +326,7 @@ const server = http.createServer(async (req, res) => {
         }
 
         // Step 4: Login Approved — create secure session token
-        const sessionToken = generateSessionToken();
-        sessions.set(sessionToken, member);
+        const sessionToken = createSession(member);
         logAudit(
           member.handle,
           'OAUTH_LOGIN_SUCCESS',
@@ -313,6 +350,9 @@ const server = http.createServer(async (req, res) => {
 
     // Dev Simulation Endpoint: Test complete OAuth pipeline without registering real GitHub App
     if (pathname === '/api/auth/github/simulate' && method === 'GET') {
+      if (process.env.NODE_ENV === 'production') {
+        return sendJson(res, 404, { error: 'Not found' });
+      }
       const numericId = parseInt(urlObj.searchParams.get('github_numeric_id') || '10101', 10);
       const member = db.prepare('SELECT * FROM members WHERE github_numeric_id = ?').get(numericId);
 
@@ -330,8 +370,7 @@ const server = http.createServer(async (req, res) => {
         return res.end();
       }
 
-      const sessionToken = generateSessionToken();
-      sessions.set(sessionToken, member);
+      const sessionToken = createSession(member);
       logAudit(
         member.handle,
         'OAUTH_SIM_SUCCESS',
@@ -347,6 +386,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/auth/login' && method === 'POST') {
+      if (process.env.NODE_ENV === 'production') {
+        return sendJson(res, 404, { error: 'Not found' });
+      }
       const body = await parseBody(req);
       const { identifier } = body;
 
@@ -376,8 +418,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-      const sessionToken = generateSessionToken();
-      sessions.set(sessionToken, member);
+      const sessionToken = createSession(member);
       logAudit(
         member.handle,
         'LOGIN_SUCCESS',
@@ -394,11 +435,11 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/auth/logout' && method === 'POST') {
       const logoutToken = cookies.frontier_session;
-      const logoutUser = logoutToken ? sessions.get(logoutToken) : null;
+      const logoutUser = getSessionUser(req);
       if (logoutUser) {
         logAudit(logoutUser.handle, 'LOGOUT', 'auth_session', 'User signed out.', 'SUCCESS');
       }
-      if (logoutToken) sessions.delete(logoutToken);
+      if (logoutToken) destroySession(logoutToken);
       res.writeHead(200, {
         'Content-Type': 'application/json',
         'Set-Cookie': 'frontier_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'
@@ -407,6 +448,9 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (pathname === '/api/auth/login-as' && method === 'POST') {
+      if (process.env.NODE_ENV === 'production') {
+        return sendJson(res, 404, { error: 'Not found' });
+      }
       const body = await parseBody(req);
       const { github_numeric_id } = body;
 
@@ -426,8 +470,7 @@ const server = http.createServer(async (req, res) => {
         });
       }
 
-      const sessionToken = generateSessionToken();
-      sessions.set(sessionToken, member);
+      const sessionToken = createSession(member);
       logAudit(
         member.handle,
         'LOGIN_SUCCESS',
@@ -904,8 +947,12 @@ const server = http.createServer(async (req, res) => {
     // -------------------------------------------------------------
     if (pathname === '/api/voting/current' && method === 'GET') {
       const currentUser = getSessionUser(req);
-      const session = db.prepare('SELECT * FROM voting_sessions WHERE id = 1').get();
-      if (!session) return sendJson(res, 404, { error: 'No active voting session' });
+      const requestedId = parseInt(urlObj.searchParams.get('session_id') || '1', 10);
+      const session = db.prepare('SELECT * FROM voting_sessions WHERE id = ?').get(requestedId) ||
+                      db.prepare('SELECT * FROM voting_sessions ORDER BY id ASC LIMIT 1').get();
+      if (!session) return sendJson(res, 404, { error: 'No voting session found' });
+
+      const allSessions = db.prepare('SELECT id, title, description, session_type, status FROM voting_sessions ORDER BY id ASC').all();
 
       const options = db.prepare(`
         SELECT vo.*, m.name as candidate_name, m.role as candidate_role
@@ -939,6 +986,7 @@ const server = http.createServer(async (req, res) => {
 
       return sendJson(res, 200, {
         session,
+        allSessions,
         options,
         userHasClaimedToken: !!eligibility,
         totalBallots,
@@ -1046,10 +1094,97 @@ const server = http.createServer(async (req, res) => {
         return sendJson(res, 403, { error: 'Permission Denied: Only the Team Host can close a voting session.' });
       }
 
-      db.prepare(`UPDATE voting_sessions SET status = 'CLOSED', closed_at = ? WHERE id = 1`).run(new Date().toISOString());
-      logAudit(currentUser.handle, 'CLOSE_VOTING_SESSION', 'voting_session_1', 'Host closed voting session and revealed aggregate tallies.', 'SUCCESS');
+      const body = await parseBody(req);
+      const targetSessionId = body.session_id || 1;
 
-      return sendJson(res, 200, { message: 'Voting session closed. Final performance tallies revealed!' });
+      db.prepare(`UPDATE voting_sessions SET status = 'CLOSED', closed_at = ? WHERE id = ?`).run(new Date().toISOString(), targetSessionId);
+      logAudit(currentUser.handle, 'CLOSE_VOTING_SESSION', `voting_session_${targetSessionId}`, `Host closed voting session #${targetSessionId} and revealed aggregate tallies.`, 'SUCCESS');
+
+      return sendJson(res, 200, { message: `Voting session #${targetSessionId} closed. Final tallies revealed!` });
+    }
+
+    if (pathname === '/api/voting/reopen' && method === 'POST') {
+      const currentUser = getSessionUser(req);
+      if (!currentUser || !currentUser.is_host) {
+        return sendJson(res, 403, { error: 'Permission Denied: Only the Team Host can reopen a voting session.' });
+      }
+
+      const body = await parseBody(req);
+      const targetSessionId = body.session_id || 1;
+
+      db.prepare(`UPDATE voting_sessions SET status = 'ACTIVE', closed_at = NULL WHERE id = ?`).run(targetSessionId);
+      logAudit(currentUser.handle, 'REOPEN_VOTING_SESSION', `voting_session_${targetSessionId}`, `Host reopened voting session #${targetSessionId}.`, 'SUCCESS');
+
+      return sendJson(res, 200, { message: `Voting session #${targetSessionId} reopened for evaluations.` });
+    }
+
+    // -------------------------------------------------------------
+    // API: PEER TASKLETS (Member-to-Member informal micro-tasks)
+    // -------------------------------------------------------------
+    if (pathname === '/api/tasklets' && method === 'GET') {
+      const currentUser = getSessionUser(req);
+      if (!currentUser) return sendJson(res, 401, { error: 'Authentication required' });
+
+      const tasklets = db.prepare(`
+        SELECT t.*,
+               s.name as sender_name, s.handle as sender_handle, s.team_track as sender_track,
+               r.name as receiver_name, r.handle as receiver_handle, r.team_track as receiver_track
+        FROM tasklets t
+        JOIN members s ON t.sender_id = s.id
+        JOIN members r ON t.receiver_id = r.id
+        ORDER BY t.id DESC
+      `).all();
+
+      return sendJson(res, 200, { tasklets });
+    }
+
+    if (pathname === '/api/tasklets' && method === 'POST') {
+      const currentUser = getSessionUser(req);
+      if (!currentUser) return sendJson(res, 401, { error: 'Authentication required' });
+
+      const body = await parseBody(req);
+      const { receiver_id, title, description } = body;
+
+      if (!receiver_id || !title) {
+        return sendJson(res, 400, { error: 'Peer recipient and title are required.' });
+      }
+
+      const now = new Date().toISOString();
+      const info = db.prepare(`
+        INSERT INTO tasklets (sender_id, receiver_id, title, description, status, created_at, updated_at)
+        VALUES (?, ?, ?, ?, 'PENDING', ?, ?)
+      `).run(currentUser.id, parseInt(receiver_id, 10), title.trim(), (description || '').trim(), now, now);
+
+      logAudit(currentUser.handle, 'CREATE_TASKLET', `tasklet_${info.lastInsertRowid}`, `Sent tasklet "${title.trim()}" to member #${receiver_id}`, 'SUCCESS');
+
+      return sendJson(res, 201, { id: info.lastInsertRowid, message: 'Tasklet sent to peer!' });
+    }
+
+    if (pathname.startsWith('/api/tasklets/') && method === 'PATCH') {
+      const currentUser = getSessionUser(req);
+      if (!currentUser) return sendJson(res, 401, { error: 'Authentication required' });
+
+      const taskletId = parseInt(pathname.split('/')[3], 10);
+      const body = await parseBody(req);
+      const { status } = body;
+
+      const allowedStatuses = ['PENDING', 'ACCEPTED', 'DONE'];
+      if (!allowedStatuses.includes(status)) {
+        return sendJson(res, 400, { error: 'Invalid tasklet status' });
+      }
+
+      const tasklet = db.prepare('SELECT * FROM tasklets WHERE id = ?').get(taskletId);
+      if (!tasklet) return sendJson(res, 404, { error: 'Tasklet not found' });
+
+      if (tasklet.sender_id !== currentUser.id && tasklet.receiver_id !== currentUser.id && !currentUser.is_host) {
+        return sendJson(res, 403, { error: 'You are neither the sender nor the recipient of this tasklet.' });
+      }
+
+      db.prepare(`UPDATE tasklets SET status = ?, updated_at = ? WHERE id = ?`).run(status, new Date().toISOString(), taskletId);
+
+      logAudit(currentUser.handle, 'UPDATE_TASKLET', `tasklet_${taskletId}`, `Updated tasklet status to ${status}`, 'SUCCESS');
+
+      return sendJson(res, 200, { message: `Tasklet updated to ${status}` });
     }
 
     // -------------------------------------------------------------
@@ -1153,6 +1288,13 @@ const server = http.createServer(async (req, res) => {
     // API: AUDIT LOGS
     // -------------------------------------------------------------
     if (pathname === '/api/audit' && method === 'GET') {
+      const currentUser = getSessionUser(req);
+      if (!currentUser) {
+        return sendJson(res, 401, { error: 'Authentication required' });
+      }
+      if (!currentUser.is_host) {
+        return sendJson(res, 403, { error: 'Permission Denied: Audit log is restricted to Team Lead.' });
+      }
       const events = db.prepare('SELECT * FROM audit_events ORDER BY id DESC LIMIT 50').all();
       return sendJson(res, 200, { events });
     }

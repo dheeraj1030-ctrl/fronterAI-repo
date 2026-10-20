@@ -10,11 +10,17 @@ const state = {
   personalData: null,
   calendarEvents: [],
   taskFilter: 'all',
+  currentVotingSessionId: 1,
   votingSession: null,
   unlinkedBallotToken: null,
   tickets: [],
   auditEvents: [],
-  auditSearchTerm: ''
+  auditSearchTerm: '',
+  tasklets: [],
+  taskletTab: 'received',
+  dockedCallActive: false,
+  dockedCallMuted: false,
+  dockedCallCamOff: false
 };
 
 export function showToast(message, isError = false) {
@@ -90,6 +96,7 @@ async function init() {
     await loadVotingSession();
     await loadTickets();
     await loadAuditTrail();
+    await loadTasklets();
     renderGlobalHub();
   } else {
     showAuthScreen();
@@ -110,7 +117,7 @@ function showWorkspace() {
 }
 
 // -------------------------------------------------------------
-// NAVIGATION (GOOGLE WORKSPACE SIDEBAR RAIL)
+// NAVIGATION (SIMPLIFIED 4-MODULE RAIL)
 // -------------------------------------------------------------
 function setupNavigation() {
   const navItems = document.querySelectorAll('.nav-item');
@@ -120,26 +127,128 @@ function setupNavigation() {
     });
   });
 
+  // Task Segmented Tabs ("Assigned to Me" vs "All Tasks")
+  const tabMine = document.getElementById('tab-tasks-mine');
+  const tabAll = document.getElementById('tab-tasks-all');
+  const containerMine = document.getElementById('container-tasks-mine');
+  const containerAll = document.getElementById('container-tasks-all');
+
+  const filterPills = document.getElementById('task-filter-pills');
+
+  tabMine?.addEventListener('click', () => {
+    tabMine.classList.add('active');
+    tabAll?.classList.remove('active');
+    containerMine?.classList.remove('hidden');
+    containerAll?.classList.add('hidden');
+    filterPills?.classList.add('hidden');
+    loadPersonalDashboard();
+  });
+
+  tabAll?.addEventListener('click', () => {
+    tabAll.classList.add('active');
+    tabMine?.classList.remove('active');
+    containerAll?.classList.remove('hidden');
+    containerMine?.classList.add('hidden');
+    filterPills?.classList.remove('hidden');
+    renderKanbanBoard();
+  });
+
+  // Tasklets Segmented Tabs ("Received" vs "Sent")
+  document.querySelectorAll('#tasklets-tab-group button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#tasklets-tab-group button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.taskletTab = btn.dataset.taskletTab;
+      renderTasklets();
+    });
+  });
+
+  // Peer Review Template Tabs (Template 1 vs Template 2)
+  document.querySelectorAll('#voting-template-tabs button').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      document.querySelectorAll('#voting-template-tabs button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.currentVotingSessionId = parseInt(btn.dataset.templateId, 10);
+      state.unlinkedBallotToken = sessionStorage.getItem('ballot_token_' + state.currentVotingSessionId) || null;
+      await loadVotingSession();
+    });
+  });
+
+
+
+  // Settings & Logs Subtabs
+  document.querySelectorAll('#settings-subtabs .segmented-tab').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const subtab = btn.dataset.subtab;
+      const isHost = state.currentUser && !!state.currentUser.is_host;
+      if (!isHost && (subtab === 'permissions' || subtab === 'history' || subtab === 'snapshot')) {
+        showToast('Team Lead Only: This administrative section is managed by the Team Lead.', true);
+        return;
+      }
+
+      document.querySelectorAll('#settings-subtabs .segmented-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      document.querySelectorAll('.settings-subpanel').forEach(p => p.classList.add('hidden'));
+      const targetPanel = document.getElementById(`panel-settings-${subtab}`);
+      targetPanel?.classList.remove('hidden');
+
+      if (subtab === 'directory') renderTeamRoster();
+      else if (subtab === 'permissions') loadTickets();
+      else if (subtab === 'history') loadAuditTrail();
+    });
+  });
+
+  // Call Room Quick Card Jump
+  document.getElementById('card-call-room-quick')?.addEventListener('click', () => switchView('view-callroom'));
+
   // Deep links & jump buttons
-  document.getElementById('btn-jump-to-calendar')?.addEventListener('click', () => switchView('view-calendar'));
-  document.getElementById('btn-global-view-cal')?.addEventListener('click', () => switchView('view-calendar'));
+  document.getElementById('btn-jump-to-calendar')?.addEventListener('click', () => switchView('view-callroom'));
+  document.getElementById('btn-global-view-cal')?.addEventListener('click', () => switchView('view-callroom'));
   document.getElementById('btn-global-open-voting')?.addEventListener('click', () => switchView('view-voting'));
   document.getElementById('card-global-vote')?.addEventListener('click', () => switchView('view-voting'));
-  document.getElementById('btn-jump-to-roster')?.addEventListener('click', () => switchView('view-team'));
+  document.getElementById('btn-jump-to-roster')?.addEventListener('click', () => {
+    if (state.currentUser?.is_host) {
+      switchView('view-settings');
+    } else {
+      switchView('view-peers');
+    }
+  });
 
   // Sidebar toggle button
   document.getElementById('btn-toggle-sidebar')?.addEventListener('click', () => {
     const sidebar = document.getElementById('sidebar');
-    sidebar.classList.toggle('collapsed');
+    sidebar?.classList.toggle('collapsed');
   });
 }
 
 function switchView(viewId) {
-  // ROLE SEGMENTATION CHECK FOR RESTRICTED MODULES
-  const isHost = state.currentUser && !!state.currentUser.is_host;
-  if (!isHost && (viewId === 'view-governance' || viewId === 'view-audit' || viewId === 'view-recovery')) {
-    showToast('Lead Access Required: This administrative section is restricted to the Team Lead.', true);
-    return;
+  // Graceful redirects from legacy view names
+  if (viewId === 'view-personal') {
+    viewId = 'view-tasks';
+    document.getElementById('tab-tasks-mine')?.click();
+  } else if (viewId === 'view-global') {
+    viewId = 'view-tasks';
+    document.getElementById('tab-tasks-all')?.click();
+  } else if (viewId === 'view-calendar') {
+    viewId = 'view-callroom';
+  } else if (viewId === 'view-team') {
+    viewId = state.currentUser?.is_host ? 'view-settings' : 'view-peers';
+    document.querySelector('#settings-subtabs [data-subtab="directory"]')?.click();
+  } else if (viewId === 'view-governance') {
+    viewId = 'view-settings';
+    document.querySelector('#settings-subtabs [data-subtab="permissions"]')?.click();
+  } else if (viewId === 'view-audit') {
+    viewId = 'view-settings';
+    document.querySelector('#settings-subtabs [data-subtab="history"]')?.click();
+  } else if (viewId === 'view-recovery') {
+    viewId = 'view-settings';
+    document.querySelector('#settings-subtabs [data-subtab="snapshot"]')?.click();
+  }
+
+  // Non-lead trying to view settings -> redirect to peers
+  if (viewId === 'view-settings' && state.currentUser && !state.currentUser.is_host) {
+    viewId = 'view-peers';
   }
 
   document.querySelectorAll('.nav-item').forEach(item => {
@@ -150,14 +259,21 @@ function switchView(viewId) {
     view.classList.toggle('active', view.id === viewId);
   });
 
-  if (viewId === 'view-personal') loadPersonalDashboard();
-  if (viewId === 'view-global') renderGlobalHub();
-  if (viewId === 'view-tasks') renderKanbanBoard();
-  if (viewId === 'view-voting') loadVotingSession();
-  if (viewId === 'view-calendar') loadCalendarEvents();
-  if (viewId === 'view-governance') loadTickets();
-  if (viewId === 'view-team') renderTeamRoster();
-  if (viewId === 'view-audit') loadAuditTrail();
+  if (viewId === 'view-tasks') {
+    loadPersonalDashboard();
+    renderKanbanBoard();
+    updateTaskKPIs();
+    updateRoomStatusWidget();
+  } else if (viewId === 'view-callroom') {
+    loadCalendarEvents();
+  } else if (viewId === 'view-voting') {
+    loadVotingSession();
+  } else if (viewId === 'view-peers') {
+    loadMembers().then(renderTeamRoster);
+    loadTasklets();
+  } else if (viewId === 'view-settings') {
+    loadMembers().then(renderTeamRoster);
+  }
 }
 
 // -------------------------------------------------------------
@@ -206,7 +322,7 @@ async function submitLogin(identifier) {
     const data = await res.json();
 
     if (!res.ok) {
-      showToast(data.error || 'Login rejected: account not in allowlist', true);
+      showToast(data.error || 'Login rejected: account not on team roster', true);
       return;
     }
 
@@ -222,13 +338,16 @@ async function submitLogin(identifier) {
     await loadCalendarEvents();
     await loadVotingSession();
     await loadTickets();
-    renderGlobalHub();
+    await loadTasklets();
+    updateTaskKPIs();
+    updateRoomStatusWidget();
 
-    // Default view based on role
+    // Default view: Tasks
+    switchView('view-tasks');
     if (state.currentUser.is_host) {
-      switchView('view-global'); // Lead sees global overview first
+      document.getElementById('tab-tasks-all')?.click();
     } else {
-      switchView('view-personal'); // Member starts in their personal workspace
+      document.getElementById('tab-tasks-mine')?.click();
     }
   } catch (err) {
     showToast('Failed to sign in', true);
@@ -244,11 +363,15 @@ function applyRolePermissions() {
   const roleIndicator = document.getElementById('sidebar-role-indicator');
   const roleDesc = document.getElementById('sidebar-role-desc');
   const productTag = document.querySelector('.workspace-product-tag');
-  const adminSection = document.getElementById('sidebar-admin-section');
-  const adminDivider = document.getElementById('sidebar-admin-divider');
+
+  // Sidebar Item 4: Peers (Members) vs Settings & Logs (Lead)
+  const navItem4 = document.getElementById('nav-item-peers-settings');
+  const navLabel4 = document.getElementById('nav-label-peers-settings');
+  const navIcon4 = document.getElementById('nav-icon-peers-settings');
+  const badgeTasklets = document.getElementById('badge-tasklets-count');
 
   if (isHost) {
-    if (productTag) productTag.textContent = 'Management Platform';
+    if (productTag) productTag.textContent = 'Team Workspace';
     if (hostPill) {
       hostPill.textContent = 'LEAD';
       hostPill.style.display = 'inline-block';
@@ -256,14 +379,16 @@ function applyRolePermissions() {
       hostPill.style.color = 'var(--google-blue-text)';
     }
     if (roleIndicator) roleIndicator.textContent = 'Role: Team Lead';
-    if (roleDesc) roleDesc.textContent = 'Lead access: task assignment, team meetings, peer evaluations, and governance.';
-    
-    // Unhide full admin navigation rail for Lead
-    if (adminSection) adminSection.style.display = 'flex';
-    if (adminDivider) adminDivider.style.display = 'block';
+    if (roleDesc) roleDesc.textContent = 'Lead access: allot tasks, trigger sync calls, review sessions.';
 
+    if (navItem4) navItem4.dataset.view = 'view-settings';
+    if (navLabel4) navLabel4.textContent = 'Settings & Logs';
+    if (navIcon4) {
+      navIcon4.innerHTML = `<svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>`;
+    }
+    if (badgeTasklets) badgeTasklets.style.display = 'none';
   } else {
-    if (productTag) productTag.textContent = 'Engineer Workspace';
+    if (productTag) productTag.textContent = 'Student Workspace';
     if (hostPill) {
       hostPill.textContent = 'MEMBER';
       hostPill.style.display = 'inline-block';
@@ -271,17 +396,14 @@ function applyRolePermissions() {
       hostPill.style.color = 'var(--text-secondary)';
     }
     if (roleIndicator) roleIndicator.textContent = 'Role: Member';
-    if (roleDesc) roleDesc.textContent = 'Personal workspace: submit deliverables and participate in peer evaluations.';
-    
-    // HIDE ADMINISTRATIVE SECTION FROM NON-ADMINS
-    if (adminSection) adminSection.style.display = 'none';
-    if (adminDivider) adminDivider.style.display = 'none';
+    if (roleDesc) roleDesc.textContent = 'Member access: my tasks, call room, peer review, and peers.';
 
-    // If non-admin is currently on an admin-restricted view, redirect to personal workspace
-    const activeView = document.querySelector('.workspace-view.active');
-    if (activeView && (activeView.id === 'view-governance' || activeView.id === 'view-audit' || activeView.id === 'view-recovery')) {
-      switchView('view-personal');
+    if (navItem4) navItem4.dataset.view = 'view-peers';
+    if (navLabel4) navLabel4.textContent = 'Peers';
+    if (navIcon4) {
+      navIcon4.innerHTML = `<svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>`;
     }
+    updateTaskletBadges();
   }
 
   // Authorator-only action buttons in the UI
@@ -289,17 +411,18 @@ function applyRolePermissions() {
   const hostAllotTrigger = document.getElementById('btn-host-allot-trigger');
   const schedCalBtn = document.getElementById('btn-open-calendar-modal');
   const closeVoteBtn = document.getElementById('btn-host-close-voting');
+  const reopenVoteBtn = document.getElementById('btn-host-reopen-voting');
 
   if (!isHost) {
     if (allotBtn) allotBtn.style.display = 'none';
     if (hostAllotTrigger) hostAllotTrigger.style.display = 'none';
     if (schedCalBtn) schedCalBtn.style.display = 'none';
     if (closeVoteBtn) closeVoteBtn.style.display = 'none';
+    if (reopenVoteBtn) reopenVoteBtn.style.display = 'none';
   } else {
     if (allotBtn) allotBtn.style.display = 'inline-flex';
     if (hostAllotTrigger) hostAllotTrigger.style.display = 'inline-flex';
     if (schedCalBtn) schedCalBtn.style.display = 'inline-flex';
-    if (closeVoteBtn) closeVoteBtn.style.display = 'inline-flex';
   }
 }
 
@@ -372,26 +495,26 @@ function populatePersonaDropdown() {
       <div class="user-avatar">${getInitials(member.name)}</div>
       <div class="persona-info-wrap">
         <div class="persona-opt-name">${member.name} ${member.is_host ? '<span class="host-pill-tag">ADMIN</span>' : '<span class="nav-badge">NON-ADMIN</span>'}</div>
-        <div class="persona-opt-sub">${member.role} • ID: ${member.github_numeric_id}</div>
+        <div class="persona-opt-sub">${member.role} • @${member.handle}</div>
       </div>
       ${isActive ? '<span class="persona-check">✓</span>' : ''}
     `;
 
     row.addEventListener('click', async () => {
       document.getElementById('persona-dropdown-menu').classList.add('hidden');
-      await loginAs(member.github_numeric_id);
+      await loginAs(member.handle);
     });
 
     container.appendChild(row);
   });
 }
 
-async function loginAs(numericId) {
+async function loginAs(identifier) {
   try {
-    const res = await fetch('/api/auth/login-as', {
+    const res = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ github_numeric_id: numericId })
+      body: JSON.stringify({ identifier })
     });
 
     const data = await res.json();
@@ -409,10 +532,11 @@ async function loginAs(numericId) {
     showToast(`Signed in as ${state.currentUser.name} (${state.currentUser.role})`);
 
     // Switch to role-appropriate view
+    switchView('view-tasks');
     if (state.currentUser.is_host) {
-      switchView('view-global');
+      document.getElementById('tab-tasks-all')?.click();
     } else {
-      switchView('view-personal');
+      document.getElementById('tab-tasks-mine')?.click();
     }
 
     await loadTasks();
@@ -420,14 +544,16 @@ async function loginAs(numericId) {
     await loadVotingSession();
     await loadCalendarEvents();
     await loadTickets();
-    renderGlobalHub();
+    await loadTasklets();
+    updateTaskKPIs();
+    updateRoomStatusWidget();
   } catch (err) {
     showToast('Failed to switch persona', true);
   }
 }
 
 // -------------------------------------------------------------
-// VIEW 1: PERSONAL DASHBOARD ("MY WORKSPACE")
+// VIEW 1: TASKS ("ASSIGNED TO ME" & CHECKLIST)
 // -------------------------------------------------------------
 async function loadPersonalDashboard() {
   try {
@@ -444,63 +570,76 @@ function renderPersonalDashboard() {
   const p = state.personalData;
   if (!p) return;
 
-  document.getElementById('personal-greeting-name').textContent = p.user.name;
+  const elGreeting = document.getElementById('personal-greeting-name');
+  if (elGreeting) elGreeting.textContent = p.user.name;
   const hostTag = document.getElementById('personal-host-tag');
-  hostTag.textContent = p.user.is_host ? 'Team Lead' : 'Team Member';
+  if (hostTag) hostTag.textContent = p.user.is_host ? 'Team Lead' : 'Team Member';
 
   // Completion stats
-  const stats = p.stats;
-  document.getElementById('personal-completion-rate').textContent = `${stats.completionRate}%`;
-  document.getElementById('personal-tasks-fill').style.width = `${stats.completionRate}%`;
-  document.getElementById('personal-tasks-subtext').textContent = `${stats.completed} Completed · ${stats.inProgress} In Progress · ${stats.todo} To Do`;
-  document.getElementById('badge-my-tasks-count').textContent = stats.total;
-  document.getElementById('personal-task-count-pill').textContent = stats.total;
+  const stats = p.stats || {};
+  const elComp = document.getElementById('personal-completion-rate');
+  if (elComp) elComp.textContent = `${stats.completionRate || 0}%`;
+  const elFill = document.getElementById('personal-tasks-fill');
+  if (elFill) elFill.style.width = `${stats.completionRate || 0}%`;
+  const elSub = document.getElementById('personal-tasks-subtext');
+  if (elSub) elSub.textContent = `${stats.completed || 0} Completed · ${stats.inProgress || 0} In Progress · ${stats.todo || 0} To Do`;
+  const elBadge = document.getElementById('badge-my-tasks-count');
+  if (elBadge) elBadge.textContent = stats.total || 0;
+  const elPill = document.getElementById('personal-task-count-pill');
+  if (elPill) elPill.textContent = stats.total || 0;
 
   // Calendar stats
-  document.getElementById('personal-events-count').textContent = `${p.events.length} Events`;
-  if (p.events.length > 0) {
-    document.getElementById('personal-next-event-text').textContent = `Next: ${p.events[0].title} (${p.events[0].time_label})`;
-  } else {
-    document.getElementById('personal-next-event-text').textContent = 'No upcoming events';
+  const elEvCount = document.getElementById('personal-events-count');
+  if (elEvCount) elEvCount.textContent = `${p.events?.length || 0} Events`;
+  const elNextEv = document.getElementById('personal-next-event-text');
+  if (elNextEv) {
+    if (p.events && p.events.length > 0) {
+      elNextEv.textContent = `Next: ${p.events[0].title} (${p.events[0].time_label})`;
+    } else {
+      elNextEv.textContent = 'No upcoming sync calls';
+    }
   }
 
   // Voting Status
   const voteStatusText = document.getElementById('personal-vote-status-text');
   const voteStatusTag = document.getElementById('personal-ballot-status-tag');
-  if (p.hasVoted) {
-    voteStatusText.textContent = 'Submitted';
-    voteStatusTag.className = 'kpi-tag tag-green';
-    voteStatusTag.textContent = 'Completed';
-  } else {
-    voteStatusText.textContent = 'Pending Vote';
-    voteStatusTag.className = 'kpi-tag tag-amber';
-    voteStatusTag.textContent = 'Action Required';
+  if (voteStatusText && voteStatusTag) {
+    if (p.hasVoted) {
+      voteStatusText.textContent = 'Submitted';
+      voteStatusTag.className = 'kpi-tag tag-green';
+      voteStatusTag.textContent = 'Completed';
+    } else {
+      voteStatusText.textContent = 'Pending Review';
+      voteStatusTag.className = 'kpi-tag tag-amber';
+      voteStatusTag.textContent = 'Action Needed';
+    }
   }
 
   // Render My Allocated Tasks
   const taskList = document.getElementById('personal-allocated-tasks-list');
-  taskList.innerHTML = '';
+  if (taskList) {
+    taskList.innerHTML = '';
+    if (!p.tasks || p.tasks.length === 0) {
+      taskList.innerHTML = '<div class="card"><p class="card-desc">No tasks currently assigned to you. Enjoy the breathing room or pick a task from the board!</p></div>';
+    } else {
+      p.tasks.forEach(task => {
+        const row = document.createElement('div');
+        row.className = 'compact-task-row';
+        const hasDeliverable = !!task.deliverable_url;
 
-  if (p.tasks.length === 0) {
-    taskList.innerHTML = '<div class="card"><p class="card-desc">No tasks currently assigned to you.</p></div>';
-  } else {
-    p.tasks.forEach(task => {
-      const row = document.createElement('div');
-      row.className = 'compact-task-row';
-      const hasDeliverable = !!task.deliverable_url;
-
-      row.innerHTML = `
-        <div>
-          <div class="compact-task-title">${task.title}</div>
-          <div class="compact-task-assignee">Target Deadline: <strong>${task.deadline || 'Flexible'}</strong> · Status: <strong>${task.status}</strong></div>
-          ${hasDeliverable ? `<div style="margin-top:4px;"><a href="${task.deliverable_url}" target="_blank" class="deliverable-link">PR: ${task.deliverable_url}</a></div>` : ''}
-        </div>
-        <div style="display:flex; gap:6px;">
-          <span class="track-badge track-${task.track}">${task.status.replace('_', ' ')}</span>
-        </div>
-      `;
-      taskList.appendChild(row);
-    });
+        row.innerHTML = `
+          <div>
+            <div class="compact-task-title">${task.title}</div>
+            <div class="compact-task-assignee">Target Date: <strong>${task.deadline || 'Flexible'}</strong> · Status: <strong>${task.status}</strong></div>
+            ${hasDeliverable ? `<div style="margin-top:4px;"><a href="${task.deliverable_url}" target="_blank" class="deliverable-link">PR: ${task.deliverable_url}</a></div>` : ''}
+          </div>
+          <div style="display:flex; gap:6px; align-items:center;">
+            <span class="track-badge track-${task.track}">${task.status.replace('_', ' ')}</span>
+          </div>
+        `;
+        taskList.appendChild(row);
+      });
+    }
   }
 
   // Render Live Meeting Banner if any active live session
@@ -508,28 +647,32 @@ function renderPersonalDashboard() {
   if (liveBanner) {
     if (p.liveMeeting) {
       liveBanner.style.display = 'flex';
-      document.getElementById('live-meeting-title').textContent = p.liveMeeting.title;
+      const elLiveTitle = document.getElementById('live-meeting-title');
+      if (elLiveTitle) elLiveTitle.textContent = p.liveMeeting.title;
       const slotDesc = p.liveMeeting.slot_name ? `${p.liveMeeting.slot_name} (${p.liveMeeting.slot_code || 'SLOT'})` : 'Secure Bridge';
-      document.getElementById('live-meeting-meta').textContent = `Hosted by Team Lead · ${slotDesc} · Scheduled for ${p.liveMeeting.time_label || 'Now'}`;
+      const elLiveMeta = document.getElementById('live-meeting-meta');
+      if (elLiveMeta) elLiveMeta.textContent = `Hosted by Team Lead · ${slotDesc} · Scheduled for ${p.liveMeeting.time_label || 'Now'}`;
       
       const liveBtn = document.getElementById('btn-join-live-meeting');
-      liveBtn.onclick = () => {
-        window.open(p.liveMeeting.join_url, 'FrontierMeetingWindow', 'width=1200,height=800,menubar=no,toolbar=no');
-      };
+      if (liveBtn) {
+        liveBtn.onclick = () => {
+          window.open(p.liveMeeting.join_url, 'FrontierMeetingWindow', 'width=1200,height=800,menubar=no,toolbar=no');
+        };
+      }
 
       const actionsContainer = document.getElementById('live-banner-actions');
-      if (state.currentUser && state.currentUser.is_host) {
+      if (actionsContainer && state.currentUser && state.currentUser.is_host) {
         if (!document.getElementById('btn-end-live-meeting')) {
           const endBtn = document.createElement('button');
           endBtn.id = 'btn-end-live-meeting';
           endBtn.className = 'btn btn-outlined btn-cal-end';
           endBtn.style.marginLeft = '8px';
-          endBtn.textContent = 'End Session';
+          endBtn.textContent = 'End Call';
           endBtn.onclick = async () => {
             try {
               const res = await fetch(`/api/calendar/${p.liveMeeting.id}/end`, { method: 'POST' });
               if (res.ok) {
-                showToast('Meeting session concluded.');
+                showToast('Meeting session ended.');
                 await loadPersonalDashboard();
                 await loadCalendarEvents();
               }
@@ -550,44 +693,229 @@ function renderPersonalDashboard() {
 
   // Render My Upcoming Calendar Pings
   const pingsList = document.getElementById('personal-calendar-pings-list');
-  pingsList.innerHTML = '';
+  if (pingsList) {
+    pingsList.innerHTML = '';
+    if (!p.events || p.events.length === 0) {
+      pingsList.innerHTML = '<div class="card"><p class="card-desc">No upcoming calendar syncs or deadlines.</p></div>';
+    } else {
+      p.events.forEach(ev => {
+        const row = document.createElement('div');
+        row.className = 'ping-card-row';
+        const isMeeting = ev.event_type === 'MEETING' || ev.event_type === 'RETRO';
+        const slotLabel = ev.slot_name || 'Call Room';
 
-  if (p.events.length === 0) {
-    pingsList.innerHTML = '<div class="card"><p class="card-desc">No upcoming calendar events or meetings.</p></div>';
-  } else {
-    p.events.forEach(ev => {
-      const row = document.createElement('div');
-      row.className = 'ping-card-row';
-      const isMeeting = ev.event_type === 'MEETING' || ev.event_type === 'RETRO';
-      const slotLabel = ev.slot_name || 'Meeting Bridge';
+        let audienceLabel = 'Everyone';
+        if (ev.target_audience === 'BACKEND') audienceLabel = 'Backend';
+        else if (ev.target_audience === 'FRONTEND') audienceLabel = 'Frontend';
+        else if (ev.target_audience && ev.target_audience.startsWith('[')) audienceLabel = 'Selected';
+        else if (ev.assignee_name) audienceLabel = ev.assignee_name;
 
-      let audienceLabel = 'All Members';
-      if (ev.target_audience === 'BACKEND') audienceLabel = 'Backend Track';
-      else if (ev.target_audience === 'FRONTEND') audienceLabel = 'Frontend Track';
-      else if (ev.target_audience && ev.target_audience.startsWith('[')) audienceLabel = 'Selected Guests';
-      else if (ev.assignee_name) audienceLabel = ev.assignee_name;
-
-      row.innerHTML = `
-        <div>
-          <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
-            <span class="ping-title">${ev.title}</span>
-            ${ev.is_live ? '<span class="live-pulse-badge" style="font-size:9.5px; padding:2px 6px;">LIVE</span>' : ''}
+        row.innerHTML = `
+          <div>
+            <div style="display:flex; align-items:center; gap:6px; margin-bottom:2px;">
+              <span class="ping-title">${ev.title}</span>
+              ${ev.is_live ? '<span class="live-pulse-badge" style="font-size:9.5px; padding:2px 6px;">LIVE NOW</span>' : ''}
+            </div>
+            <div class="ping-meta">${ev.event_date} · ${ev.time_label} · <span style="color:var(--google-blue);">${slotLabel}</span> · <span style="color:var(--text-muted);">For: ${audienceLabel}</span></div>
           </div>
-          <div class="ping-meta">${ev.event_date} · ${ev.time_label} · <span style="color:var(--google-blue);">${slotLabel}</span> · <span style="color:var(--text-muted);">Audience: ${audienceLabel}</span></div>
-        </div>
-        <div style="display:flex; align-items:center; gap:8px;">
-          ${ev.join_url ? `<button class="meet-link-btn" onclick="window.open('${ev.join_url}', 'FrontierMeetingWindow', 'width=1200,height=800,menubar=no,toolbar=no')">Join Call</button>` : `<span class="cal-type-badge cal-tag-${ev.event_type}">${ev.event_type}</span>`}
-          ${state.currentUser && state.currentUser.is_host && isMeeting ? `
-            ${ev.is_live ? `<button class="btn-cal-action btn-cal-end" onclick="endMeetingSession(${ev.id})">End</button>` : `<button class="btn-cal-action btn-cal-ping" onclick="pingMeetingSession(${ev.id})">Ping Now</button>`}
-          ` : ''}
-        </div>
-      `;
-      pingsList.appendChild(row);
-    });
+          <div style="display:flex; align-items:center; gap:8px;">
+            ${ev.join_url ? `<button class="meet-link-btn" onclick="openDockedCallById(${ev.id})">Join Call</button>` : `<span class="cal-type-badge cal-tag-${ev.event_type}">${ev.event_type}</span>`}
+            ${state.currentUser && state.currentUser.is_host && isMeeting ? `
+              ${ev.is_live ? `<button class="btn-cal-action btn-cal-end" onclick="endMeetingSession(${ev.id})">End</button>` : `<button class="btn-cal-action btn-cal-ping" onclick="pingMeetingSession(${ev.id})">Ping Now</button>`}
+            ` : ''}
+          </div>
+        `;
+        pingsList.appendChild(row);
+      });
+    }
   }
 
   // Populate deliverable modal task select
-  populateDeliverableModalSelect(p.tasks);
+  if (p.tasks) populateDeliverableModalSelect(p.tasks);
+}
+
+// -------------------------------------------------------------
+// MODULE 1 HELPERS: TASK KPIS & CALL ROOM STATUS
+// -------------------------------------------------------------
+function updateTaskKPIs() {
+  if (!state.tasks) return;
+  const todo = state.tasks.filter(t => t.status === 'TODO').length;
+  const inProgress = state.tasks.filter(t => t.status === 'IN_PROGRESS').length;
+  const done = state.tasks.filter(t => t.status === 'COMPLETED').length;
+
+  const elTodo = document.getElementById('kpi-open-tasks');
+  const elProg = document.getElementById('kpi-in-progress');
+  const elDone = document.getElementById('kpi-done');
+  if (elTodo) elTodo.textContent = todo;
+  if (elProg) elProg.textContent = inProgress;
+  if (elDone) elDone.textContent = done;
+
+  const elBadge = document.getElementById('badge-tasks-count');
+  if (elBadge) elBadge.textContent = state.tasks.length;
+}
+
+function updateRoomStatusWidget() {
+  const liveEv = state.calendarEvents?.find(e => e.is_live);
+  const scheduledEv = state.calendarEvents?.find(e => (e.event_type === 'MEETING' || e.event_type === 'RETRO') && !e.is_live);
+  const dot = document.getElementById('room-status-dot');
+  const sidebarCallDot = document.getElementById('badge-call-status');
+  const statusText = document.getElementById('room-status-text');
+  const subtitleText = document.getElementById('room-subtitle-text');
+  const btnJoin = document.getElementById('btn-room-join-main');
+  const btnToggle = document.getElementById('btn-toggle-instant-call');
+  const quickBadge = document.getElementById('quick-call-room-status-badge');
+  const isHost = state.currentUser && !!state.currentUser.is_host;
+
+  // Hero card elements
+  const heroCard = document.getElementById('call-room-hero-card');
+  const heroDot = document.getElementById('room-hero-dot');
+  const heroBadge = document.getElementById('room-hero-badge');
+  const heroTitle = document.getElementById('room-hero-title');
+  const heroDesc = document.getElementById('room-hero-desc');
+
+  // Sidebar badge dot update & Nav Item State Color (Green if live, Yellow/Amber if scheduled, Blue if idle)
+  const callNavItem = document.querySelector('.nav-item[data-view="view-callroom"]');
+  if (callNavItem) {
+    callNavItem.classList.remove('status-live', 'status-scheduled', 'status-idle');
+    if (liveEv) {
+      callNavItem.classList.add('status-live');
+    } else if (scheduledEv) {
+      callNavItem.classList.add('status-scheduled');
+    } else {
+      callNavItem.classList.add('status-idle');
+    }
+  }
+
+  if (sidebarCallDot) {
+    if (liveEv) {
+      sidebarCallDot.className = 'room-status-dot pulse-green';
+    } else if (scheduledEv) {
+      sidebarCallDot.className = 'room-status-dot dot-scheduled';
+    } else {
+      sidebarCallDot.className = 'room-status-dot idle-gray';
+    }
+  }
+
+  if (liveEv) {
+    if (dot) dot.className = 'room-status-dot pulse-green';
+    if (statusText) statusText.textContent = `Live: ${liveEv.title}`;
+    if (subtitleText) subtitleText.textContent = `Call in progress · ${liveEv.time_label || 'Now'} · 1 sync call active`;
+
+    if (heroDot) heroDot.className = 'room-status-dot pulse-green';
+    if (heroBadge) {
+      heroBadge.textContent = 'LIVE CALL';
+      heroBadge.style.color = 'var(--google-green)';
+    }
+    if (heroTitle) heroTitle.textContent = liveEv.title;
+    if (heroDesc) heroDesc.textContent = `${liveEv.description || 'Google Meet bridge live.'} Real-time attendance verified via server gateway.`;
+    if (heroCard) heroCard.style.borderLeft = '3px solid var(--google-green)';
+
+    if (btnJoin) {
+      btnJoin.style.display = 'inline-flex';
+      btnJoin.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 21 5 3"></polygon></svg> Join Google Meet ↗`;
+      btnJoin.onclick = () => joinMeetingGateway(liveEv);
+    }
+
+    if (btnToggle) {
+      if (isHost) {
+        btnToggle.textContent = 'End Active Call';
+        btnToggle.className = 'btn btn-outlined btn-cal-end';
+        btnToggle.style.display = 'inline-flex';
+        btnToggle.onclick = async () => {
+          try {
+            const res = await fetch(`/api/calendar/${liveEv.id}/end`, { method: 'POST' });
+            if (res.ok) {
+              showToast('Sync call concluded.');
+              await loadCalendarEvents();
+              await loadPersonalDashboard();
+            }
+          } catch (err) {
+            showToast('Failed to end call', true);
+          }
+        };
+      } else {
+        btnToggle.style.display = 'none';
+      }
+    }
+    if (quickBadge) {
+      quickBadge.innerHTML = `<span class="room-status-dot pulse-green" style="display:inline-block; margin-right:4px; vertical-align:middle; width:8px; height:8px;"></span> Live Sync`;
+    }
+  } else if (scheduledEv) {
+    if (dot) dot.className = 'room-status-dot dot-scheduled';
+    if (statusText) statusText.textContent = `Scheduled: ${scheduledEv.title}`;
+    if (subtitleText) subtitleText.textContent = `${scheduledEv.time_label || scheduledEv.event_date} · Google Meet bridge ready`;
+
+    if (heroDot) heroDot.className = 'room-status-dot dot-scheduled';
+    if (heroBadge) {
+      heroBadge.textContent = 'SCHEDULED';
+      heroBadge.style.color = 'var(--google-yellow)';
+    }
+    if (heroTitle) heroTitle.textContent = `Upcoming: ${scheduledEv.title}`;
+    if (heroDesc) heroDesc.textContent = `Scheduled for ${scheduledEv.time_label || scheduledEv.event_date}. Bridge slot reserved. Lead can start call early.`;
+    if (heroCard) heroCard.style.borderLeft = '3px solid var(--google-yellow)';
+
+    if (btnJoin) {
+      btnJoin.style.display = 'inline-flex';
+      btnJoin.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 21 5 3"></polygon></svg> Open Google Meet Bridge ↗`;
+      btnJoin.onclick = () => joinMeetingGateway(scheduledEv);
+    }
+
+    if (btnToggle) {
+      if (isHost) {
+        btnToggle.textContent = 'Start Call Early';
+        btnToggle.className = 'btn btn-filled btn-cal-ping';
+        btnToggle.style.display = 'inline-flex';
+        btnToggle.onclick = async () => {
+          await pingMeetingSession(scheduledEv.id);
+        };
+      } else {
+        btnToggle.style.display = 'none';
+      }
+    }
+    if (quickBadge) {
+      quickBadge.innerHTML = `<span class="room-status-dot dot-scheduled" style="display:inline-block; margin-right:4px; vertical-align:middle; width:8px; height:8px;"></span> Scheduled`;
+    }
+  } else {
+    if (dot) dot.className = 'room-status-dot idle-gray';
+    if (statusText) statusText.textContent = 'Room Available (No Active Call)';
+    if (subtitleText) subtitleText.textContent = 'Google Meet bridge ready. 1 active call max.';
+
+    if (heroDot) heroDot.className = 'room-status-dot idle-gray';
+    if (heroBadge) {
+      heroBadge.textContent = 'STANDBY';
+      heroBadge.style.color = 'var(--text-muted)';
+    }
+    if (heroTitle) heroTitle.textContent = 'No call active right now';
+    if (heroDesc) heroDesc.textContent = 'Rotating across 6 pre-configured Google Meet bridges. Project lead can start a live call anytime.';
+    if (heroCard) heroCard.style.borderLeft = '3px solid var(--border-default)';
+
+    if (btnJoin) {
+      btnJoin.style.display = 'inline-flex';
+      btnJoin.innerHTML = `<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polygon points="5 3 19 12 5 21 5 21 5 3"></polygon></svg> Enter Google Meet Bridge ↗`;
+      btnJoin.onclick = () => joinMeetingGateway({ id: 1, title: 'Frontier Call Room' });
+    }
+
+    if (btnToggle) {
+      if (isHost) {
+        btnToggle.textContent = 'Start Team Call';
+        btnToggle.className = 'btn btn-outlined btn-cal-ping';
+        btnToggle.style.display = 'inline-flex';
+        btnToggle.onclick = async () => {
+          const nextEv = state.calendarEvents?.find(e => e.event_type === 'MEETING' || e.event_type === 'RETRO');
+          if (nextEv) {
+            await pingMeetingSession(nextEv.id);
+          } else {
+            showToast('No scheduled call found to start. Schedule one below.', true);
+          }
+        };
+      } else {
+        btnToggle.style.display = 'none';
+      }
+    }
+    if (quickBadge) {
+      quickBadge.innerHTML = `<span class="room-status-dot idle-gray" style="display:inline-block; margin-right:4px; vertical-align:middle; width:8px; height:8px;"></span> Available`;
+    }
+  }
 }
 
 // -------------------------------------------------------------
@@ -602,16 +930,21 @@ function renderGlobalHub() {
   const total = state.tasks.length;
   const pct = Math.round((completed / total) * 100);
 
-  document.getElementById('global-team-completion').textContent = `${pct}%`;
-  document.getElementById('global-team-fill').style.width = `${pct}%`;
-  document.getElementById('global-team-breakdown').textContent = `${completed} Completed • ${inProgress} In Progress • ${todo} Backlog`;
+  const elComp = document.getElementById('global-team-completion');
+  if (elComp) elComp.textContent = `${pct}%`;
+  const elFill = document.getElementById('global-team-fill');
+  if (elFill) elFill.style.width = `${pct}%`;
+  const elBrk = document.getElementById('global-team-breakdown');
+  if (elBrk) elBrk.textContent = `${completed} Completed • ${inProgress} In Progress • ${todo} Backlog`;
 
   if (state.votingSession) {
     const ballots = state.votingSession.totalBallots || 0;
     const eligible = state.votingSession.totalEligible || 8;
     const votePct = Math.round((ballots / eligible) * 100);
-    document.getElementById('global-vote-ratio').textContent = `${ballots} / ${eligible}`;
-    document.getElementById('global-vote-fill').style.width = `${votePct}%`;
+    const elRatio = document.getElementById('global-vote-ratio');
+    if (elRatio) elRatio.textContent = `${ballots} / ${eligible}`;
+    const elVFill = document.getElementById('global-vote-fill');
+    if (elVFill) elVFill.style.width = `${votePct}%`;
   }
 
   // Populate Global Team Overview Table
@@ -648,8 +981,10 @@ async function loadTasks() {
     const res = await fetch('/api/tasks');
     const data = await res.json();
     state.tasks = data.tasks;
-    document.getElementById('badge-tasks-count').textContent = state.tasks.length;
+    const badgeTasks = document.getElementById('badge-tasks-count');
+    if (badgeTasks) badgeTasks.textContent = state.tasks.length;
     renderKanbanBoard();
+    updateTaskKPIs();
     renderGlobalHub();
   } catch (err) {
     console.error('Failed to load tasks:', err);
@@ -811,9 +1146,17 @@ async function updateTaskWithOccCheck(taskId, payload, originalTask) {
 // -------------------------------------------------------------
 async function loadVotingSession() {
   try {
-    const res = await fetch('/api/voting/current');
+    const sessionId = state.currentVotingSessionId || 1;
+    const res = await fetch(`/api/voting/current?session_id=${sessionId}`);
     const data = await res.json();
     state.votingSession = data;
+
+    // Restore unlinked ballot token from sessionStorage if present
+    const savedToken = sessionStorage.getItem('ballot_token_' + sessionId);
+    if (savedToken) {
+      state.unlinkedBallotToken = savedToken;
+    }
+
     renderVotingSession();
   } catch (err) {
     console.error('Failed to load voting session:', err);
@@ -833,7 +1176,6 @@ function renderVotingSession() {
 
   document.getElementById('stats-ballots-count').textContent = ballots;
   document.getElementById('stats-ballots-bar').style.width = `${pct}%`;
-  document.getElementById('voting-status-pill').textContent = s.isRevealed ? 'SESSION CLOSED' : 'ACTIVE ROUND';
 
   const memberName = state.currentUser ? state.currentUser.name : 'Unknown';
   document.getElementById('stepper-member-label').textContent = memberName;
@@ -846,57 +1188,89 @@ function renderVotingSession() {
   const castBox = document.getElementById('voting-cast-box');
   const completedBox = document.getElementById('voting-completed-box');
   const tallyBox = document.getElementById('tally-results-container');
+  const closeVoteBtn = document.getElementById('btn-host-close-voting');
+  const reopenVoteBtn = document.getElementById('btn-host-reopen-voting');
 
-  if (s.userHasClaimedToken) {
-    step2.className = 'step-node completed';
-    document.getElementById('step-line-2').className = 'stepper-line completed';
+  const isClosed = s.session.status === 'CLOSED';
+  const isHost = state.currentUser && !!state.currentUser.is_host;
+
+  if (isClosed || (s.isRevealed && s.tally)) {
+    // Session is closed or threshold met: show results, hide active voting boxes
+    step4.className = 'step-node completed';
+    document.getElementById('step-line-3').className = 'stepper-line completed';
+    tallyBox.classList.remove('hidden');
+    renderTallyMeters(s.tally || [], ballots);
+
     claimBox.classList.add('hidden');
-
-    if (state.unlinkedBallotToken) {
-      step3.className = 'step-node active';
-      castBox.classList.remove('hidden');
-      completedBox.classList.add('hidden');
-      document.getElementById('display-blind-token').textContent = state.unlinkedBallotToken;
-    } else {
-      step3.className = 'step-node completed';
-      castBox.classList.add('hidden');
-      completedBox.classList.remove('hidden');
-    }
-  } else {
-    step2.className = 'step-node active';
-    document.getElementById('step-line-2').className = 'stepper-line';
-    step3.className = 'step-node';
-    claimBox.classList.remove('hidden');
     castBox.classList.add('hidden');
     completedBox.classList.add('hidden');
+
+    const statusPill = document.getElementById('voting-status-pill');
+    if (statusPill) {
+      statusPill.textContent = 'SESSION CLOSED';
+      statusPill.className = 'status-pill pill-amber';
+    }
+
+    if (isHost) {
+      if (closeVoteBtn) closeVoteBtn.classList.add('hidden');
+      if (reopenVoteBtn) reopenVoteBtn.classList.remove('hidden');
+    }
+  } else {
+    // Active session
+    step4.className = 'step-node';
+    tallyBox.classList.add('hidden');
+
+    const statusPill = document.getElementById('voting-status-pill');
+    if (statusPill) {
+      statusPill.textContent = 'ACTIVE ROUND';
+      statusPill.className = 'status-pill pill-green';
+    }
+
+    if (isHost) {
+      if (closeVoteBtn) closeVoteBtn.classList.remove('hidden');
+      if (reopenVoteBtn) reopenVoteBtn.classList.add('hidden');
+    }
+
+    if (s.userHasClaimedToken) {
+      step2.className = 'step-node completed';
+      document.getElementById('step-line-2').className = 'stepper-line completed';
+      claimBox.classList.add('hidden');
+
+      if (state.unlinkedBallotToken) {
+        step3.className = 'step-node active';
+        castBox.classList.remove('hidden');
+        completedBox.classList.add('hidden');
+        document.getElementById('display-blind-token').textContent = state.unlinkedBallotToken;
+      } else {
+        step3.className = 'step-node completed';
+        castBox.classList.add('hidden');
+        completedBox.classList.remove('hidden');
+      }
+    } else {
+      step2.className = 'step-node active';
+      document.getElementById('step-line-2').className = 'stepper-line';
+      step3.className = 'step-node';
+      claimBox.classList.remove('hidden');
+      castBox.classList.add('hidden');
+      completedBox.classList.add('hidden');
+    }
   }
 
-  // Populate candidate options (The team members!)
+  // Populate options dynamically
   const choicesContainer = document.getElementById('ballot-options-container');
   choicesContainer.innerHTML = '';
-  s.options.forEach((opt, idx) => {
+  (s.options || []).forEach((opt, idx) => {
     const label = document.createElement('label');
     label.className = 'choice-card-label';
     label.innerHTML = `
       <input type="radio" name="ballot-choice-opt" value="${opt.id}" ${idx === 0 ? 'checked' : ''}>
       <div>
-        <span class="choice-text"><strong>${opt.candidate_name || ''}</strong></span>
-        <div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">${opt.label}</div>
+        <span class="choice-text"><strong>${opt.candidate_name || opt.label}</strong></span>
+        ${opt.candidate_name ? `<div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">${opt.label}</div>` : ''}
       </div>
     `;
     choicesContainer.appendChild(label);
   });
-
-  // Tally reveal
-  if (s.isRevealed && s.tally) {
-    step4.className = 'step-node completed';
-    document.getElementById('step-line-3').className = 'stepper-line completed';
-    tallyBox.classList.remove('hidden');
-    renderTallyMeters(s.tally, ballots);
-  } else {
-    step4.className = 'step-node';
-    tallyBox.classList.add('hidden');
-  }
 }
 
 function renderTallyMeters(tally, totalBallots) {
@@ -922,10 +1296,11 @@ function renderTallyMeters(tally, totalBallots) {
 
 async function claimBlindToken() {
   try {
+    const sessionId = state.currentVotingSessionId || 1;
     const res = await fetch('/api/voting/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: 1 })
+      body: JSON.stringify({ session_id: sessionId })
     });
 
     const data = await res.json();
@@ -936,6 +1311,7 @@ async function claimBlindToken() {
     }
 
     state.unlinkedBallotToken = data.token;
+    sessionStorage.setItem('ballot_token_' + sessionId, data.token);
     showToast('Blind Ballot Token issued! Your identity is decoupled from this token.');
     await loadVotingSession();
   } catch (err) {
@@ -946,8 +1322,9 @@ async function claimBlindToken() {
 async function castAnonymousBallot(e) {
   e.preventDefault();
   const selected = document.querySelector('input[name="ballot-choice-opt"]:checked');
-  if (!selected) return showToast('Please select a team member', true);
+  if (!selected) return showToast('Please select an option', true);
 
+  const sessionId = state.currentVotingSessionId || 1;
   const optionId = parseInt(selected.value, 10);
   const token = state.unlinkedBallotToken;
 
@@ -955,7 +1332,7 @@ async function castAnonymousBallot(e) {
     const res = await fetch('/api/voting/cast', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: 1, option_id: optionId, token })
+      body: JSON.stringify({ session_id: sessionId, option_id: optionId, token })
     });
 
     const data = await res.json();
@@ -966,7 +1343,8 @@ async function castAnonymousBallot(e) {
     }
 
     state.unlinkedBallotToken = null;
-    showToast('Anonymous peer performance vote successfully recorded!');
+    sessionStorage.removeItem('ballot_token_' + sessionId);
+    showToast('Anonymous review ballot successfully recorded!');
     await loadVotingSession();
     await loadPersonalDashboard();
   } catch (err) {
@@ -981,16 +1359,46 @@ async function hostCloseVotingSession() {
   }
 
   try {
-    const res = await fetch('/api/voting/close', { method: 'POST' });
+    const sessionId = state.currentVotingSessionId || 1;
+    const res = await fetch('/api/voting/close', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId })
+    });
     const data = await res.json();
     if (!res.ok) {
       showToast(data.error || 'Failed to close session', true);
       return;
     }
-    showToast('Voting session closed. Performance evaluation tallies revealed!');
+    showToast('Review session closed. Aggregate tallies revealed!');
     await loadVotingSession();
   } catch (err) {
     showToast('Error closing voting session', true);
+  }
+}
+
+async function hostReopenVotingSession() {
+  if (!state.currentUser || !state.currentUser.is_host) {
+    showToast('Host Authorization Required: Only the Team Host can reopen a voting session.', true);
+    return;
+  }
+
+  try {
+    const sessionId = state.currentVotingSessionId || 1;
+    const res = await fetch('/api/voting/reopen', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Failed to reopen session', true);
+      return;
+    }
+    showToast('Review session reopened for submissions!');
+    await loadVotingSession();
+  } catch (err) {
+    showToast('Error reopening voting session', true);
   }
 }
 
@@ -1002,8 +1410,10 @@ async function loadCalendarEvents() {
     const res = await fetch('/api/calendar');
     const data = await res.json();
     state.calendarEvents = data.events;
-    document.getElementById('badge-cal-count').textContent = state.calendarEvents.length;
+    const badgeCal = document.getElementById('badge-cal-count');
+    if (badgeCal) badgeCal.textContent = state.calendarEvents.length;
     renderCalendarEvents();
+    updateRoomStatusWidget();
   } catch (err) {
     console.error('Failed to load calendar events:', err);
   }
@@ -1063,7 +1473,7 @@ function renderCalendarEvents() {
 
       <div class="cal-card-actions">
         ${ev.join_url ? `
-          <button class="meet-link-btn" onclick="window.open('${ev.join_url}', 'FrontierMeetingWindow', 'width=1200,height=800,menubar=no,toolbar=no')">
+          <button class="meet-link-btn" onclick="openDockedCallById(${ev.id})">
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="10 8 16 12 10 16 10 8"></polygon></svg>
             Join Call
           </button>
@@ -1281,9 +1691,8 @@ async function approveTicket(ticketId) {
 // VIEW 7: TEAM DIRECTORY
 // -------------------------------------------------------------
 function renderTeamRoster() {
-  const container = document.getElementById('team-roster-cards');
-  if (!container) return;
-  container.innerHTML = '';
+  const containerSettings = document.getElementById('team-roster-cards');
+  const containerPeers = document.getElementById('team-roster-peers-cards');
 
   const subtitle = document.getElementById('team-roster-subtitle');
   if (subtitle) {
@@ -1298,7 +1707,7 @@ function renderTeamRoster() {
 
   const isHost = state.currentUser && state.currentUser.is_host === 1;
 
-  state.members.forEach(m => {
+  const renderCard = (m, isPeersView = false) => {
     const card = document.createElement('div');
     card.className = 'roster-card';
 
@@ -1307,24 +1716,25 @@ function renderTeamRoster() {
     if (m.team_track === 'lead') avatarColor = 'avatar-amber';
 
     const assignedTasks = (state.tasks || []).filter(t => t.assignee_id === m.id).length;
+    const isMe = state.currentUser && state.currentUser.id === m.id;
 
     card.innerHTML = `
       <div class="roster-card-header">
         <div class="roster-avatar ${avatarColor}">${getInitials(m.name)}</div>
         <div class="roster-title-group">
-          <h4>${m.name} ${m.is_host ? '<span class="host-pill-tag">HOST</span>' : ''}</h4>
+          <h4>${m.name} ${m.is_host ? '<span class="host-pill-tag">LEAD</span>' : ''} ${isMe ? '<span class="nav-badge">YOU</span>' : ''}</h4>
           <span class="roster-role-title">${m.role}</span>
         </div>
       </div>
 
       <div class="roster-meta-stack">
         <div class="meta-row">
-          <span class="meta-label">GitHub Handle</span>
-          <span class="meta-val">@${m.handle}</span>
+          <span class="meta-label">Track</span>
+          <span class="meta-val" style="text-transform: capitalize;">${m.team_track}</span>
         </div>
         <div class="meta-row">
-          <span class="meta-label">Numeric ID</span>
-          <span class="meta-val">${m.github_numeric_id}</span>
+          <span class="meta-label">GitHub Handle</span>
+          <span class="meta-val">@${m.handle}</span>
         </div>
         <div class="meta-row">
           <span class="meta-label">Allocated Tasks</span>
@@ -1332,11 +1742,16 @@ function renderTeamRoster() {
         </div>
       </div>
 
-      <div style="display: flex; gap: 8px; margin-top: 12px;">
-        <button class="btn btn-outlined btn-sm btn-roster-switch" data-id="${m.github_numeric_id}" style="flex: 1;">
-          Switch Persona
+      <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
+        ${isPeersView && !isMe ? `
+          <button class="btn btn-filled btn-sm btn-peer-tasklet" data-id="${m.id}" style="flex: 1;">
+            + Send Tasklet
+          </button>
+        ` : ''}
+        <button class="btn btn-outlined btn-sm btn-roster-switch" data-handle="${m.handle}" style="${isPeersView && !isMe ? '' : 'flex: 1;'}">
+          ${isMe ? 'Current User' : 'Switch Persona'}
         </button>
-        ${isHost && !m.is_host ? `
+        ${!isPeersView && isHost && !m.is_host ? `
           <button class="btn btn-danger btn-sm btn-remove-member" data-id="${m.id}" title="Remove member from allowlist">
             Remove
           </button>
@@ -1345,7 +1760,11 @@ function renderTeamRoster() {
     `;
 
     card.querySelector('.btn-roster-switch')?.addEventListener('click', async () => {
-      await loginAs(m.github_numeric_id);
+      if (!isMe) await loginAs(m.handle);
+    });
+
+    card.querySelector('.btn-peer-tasklet')?.addEventListener('click', () => {
+      openSendTaskletModal(m.id);
     });
 
     card.querySelector('.btn-remove-member')?.addEventListener('click', async () => {
@@ -1365,8 +1784,18 @@ function renderTeamRoster() {
       }
     });
 
-    container.appendChild(card);
-  });
+    return card;
+  };
+
+  if (containerSettings) {
+    containerSettings.innerHTML = '';
+    state.members.forEach(m => containerSettings.appendChild(renderCard(m, false)));
+  }
+
+  if (containerPeers) {
+    containerPeers.innerHTML = '';
+    state.members.forEach(m => containerPeers.appendChild(renderCard(m, true)));
+  }
 }
 
 // -------------------------------------------------------------
@@ -1783,6 +2212,212 @@ function setupModals() {
       showToast('Failed to create ticket', true);
     }
   });
+
+  // Send Tasklet Modal
+  const taskletModal = document.getElementById('modal-send-tasklet');
+  document.getElementById('btn-open-send-tasklet')?.addEventListener('click', () => openSendTaskletModal());
+  document.getElementById('btn-close-send-tasklet-modal')?.addEventListener('click', () => taskletModal?.close());
+  document.getElementById('btn-cancel-send-tasklet')?.addEventListener('click', () => taskletModal?.close());
+
+  document.getElementById('form-send-tasklet')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const receiver_id = parseInt(document.getElementById('tasklet-receiver').value, 10);
+    const title = document.getElementById('tasklet-title').value.trim();
+    const description = document.getElementById('tasklet-desc').value.trim();
+
+    if (!receiver_id || !title) {
+      showToast('Please select a recipient teammate and enter a title', true);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/tasklets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receiver_id, title, description })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Failed to send tasklet', true);
+        return;
+      }
+
+      showToast('Tasklet sent to teammate!');
+      taskletModal?.close();
+      document.getElementById('form-send-tasklet').reset();
+      await loadTasklets();
+    } catch (err) {
+      showToast('Error sending tasklet', true);
+    }
+  });
+}
+
+// -------------------------------------------------------------
+// MODULE 4: PEERS & TASKLETS (PEER-TO-PEER MICRO-TASKS)
+// -------------------------------------------------------------
+async function loadTasklets() {
+  try {
+    const res = await fetch('/api/tasklets');
+    const data = await res.json();
+    state.tasklets = data.tasklets || [];
+    renderTasklets();
+    updateTaskletBadges();
+  } catch (err) {
+    console.error('Failed to load tasklets:', err);
+  }
+}
+
+function updateTaskletBadges() {
+  if (!state.currentUser) return;
+  const received = (state.tasklets || []).filter(t => t.receiver_id === state.currentUser.id);
+  const sent = (state.tasklets || []).filter(t => t.sender_id === state.currentUser.id);
+  const pendingReceived = received.filter(t => t.status === 'PENDING').length;
+
+  const countRecEl = document.getElementById('count-tasklets-received');
+  if (countRecEl) countRecEl.textContent = received.length;
+
+  const countSentEl = document.getElementById('count-tasklets-sent');
+  if (countSentEl) countSentEl.textContent = sent.length;
+
+  const badgeEl = document.getElementById('badge-tasklets-count');
+  if (badgeEl) {
+    badgeEl.textContent = pendingReceived;
+    badgeEl.style.display = (!state.currentUser.is_host && pendingReceived > 0) ? 'inline-block' : 'none';
+  }
+}
+
+function renderTasklets() {
+  if (!state.currentUser) return;
+  const containerRec = document.getElementById('container-tasklets-received');
+  const containerSent = document.getElementById('container-tasklets-sent');
+  if (!containerRec || !containerSent) return;
+
+  const isReceived = state.taskletTab === 'received';
+  containerRec.classList.toggle('hidden', !isReceived);
+  containerSent.classList.toggle('hidden', isReceived);
+
+  const list = isReceived
+    ? (state.tasklets || []).filter(t => t.receiver_id === state.currentUser.id)
+    : (state.tasklets || []).filter(t => t.sender_id === state.currentUser.id);
+
+  const targetContainer = isReceived ? containerRec : containerSent;
+  targetContainer.innerHTML = '';
+
+  if (list.length === 0) {
+    targetContainer.innerHTML = `
+      <div class="empty-state" style="padding: 24px 12px; text-align: center;">
+        <p style="color: var(--text-muted); font-size: 13px;">No ${isReceived ? 'received' : 'sent'} tasklets yet. Click "+ Send Tasklet" to ask a teammate for a review or quick sync.</p>
+      </div>
+    `;
+    return;
+  }
+
+  list.forEach(t => {
+    const card = document.createElement('div');
+    card.className = 'tasklet-card';
+    const statusClass = t.status === 'DONE' ? 'tasklet-done' : (t.status === 'ACCEPTED' ? 'tasklet-accepted' : 'tasklet-pending');
+    const counterpartLabel = isReceived ? `From: ${t.sender_name || 'Teammate'}` : `To: ${t.receiver_name || 'Teammate'}`;
+    const dateStr = new Date(t.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+    let actionsHtml = '';
+    if (isReceived) {
+      if (t.status === 'PENDING') {
+        actionsHtml = `
+          <div style="display: flex; gap: 8px; margin-top: 10px;">
+            <button class="btn btn-outlined btn-sm" onclick="handleTaskletStatus(${t.id}, 'ACCEPTED')">Accept</button>
+            <button class="btn btn-filled btn-sm" onclick="handleTaskletStatus(${t.id}, 'DONE')">Mark Done</button>
+          </div>
+        `;
+      } else if (t.status === 'ACCEPTED') {
+        actionsHtml = `
+          <div style="display: flex; gap: 8px; margin-top: 10px;">
+            <button class="btn btn-filled btn-sm" onclick="handleTaskletStatus(${t.id}, 'DONE')">Mark Done</button>
+          </div>
+        `;
+      }
+    }
+
+    card.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+        <div>
+          <div style="font-weight: 600; font-size: 14px; color: var(--text-primary); margin-bottom: 2px;">${t.title}</div>
+          <div style="font-size: 12px; color: var(--text-secondary);">${counterpartLabel} • ${dateStr}</div>
+        </div>
+        <span class="tasklet-badge ${statusClass}">${t.status}</span>
+      </div>
+      ${t.description ? `<p style="font-size: 13px; color: var(--text-secondary); margin: 8px 0 0 0; line-height: 1.4;">${t.description}</p>` : ''}
+      ${actionsHtml}
+    `;
+    targetContainer.appendChild(card);
+  });
+}
+
+window.handleTaskletStatus = async function(id, status) {
+  try {
+    const res = await fetch(`/api/tasklets/${id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Failed to update tasklet', true);
+      return;
+    }
+    showToast(`Tasklet marked ${status.toLowerCase()}`);
+    await loadTasklets();
+  } catch (err) {
+    showToast('Network error updating tasklet', true);
+  }
+};
+
+function openSendTaskletModal(preselectedReceiverId = null) {
+  const modal = document.getElementById('modal-send-tasklet');
+  if (!modal) return;
+  const select = document.getElementById('tasklet-receiver');
+  if (select) {
+    select.innerHTML = '';
+    (state.members || []).filter(m => m.id !== state.currentUser?.id).forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = `${m.name} (@${m.handle} · ${m.role})`;
+      if (preselectedReceiverId && m.id === preselectedReceiverId) {
+        opt.selected = true;
+      }
+      select.appendChild(opt);
+    });
+  }
+  document.getElementById('tasklet-title').value = '';
+  document.getElementById('tasklet-desc').value = '';
+  modal.showModal();
+}
+
+// -------------------------------------------------------------
+// GOOGLE MEET GATEWAY (PATH A: COMPANION TAB / WINDOW)
+// -------------------------------------------------------------
+export function joinMeetingGateway(meetingOrId) {
+  let url = '/api/meetings/join/1';
+  let title = 'Team Meeting';
+  if (typeof meetingOrId === 'object' && meetingOrId !== null) {
+    url = meetingOrId.join_url || `/api/meetings/join/${meetingOrId.id || 1}`;
+    title = meetingOrId.title || title;
+  } else if (typeof meetingOrId === 'number' || typeof meetingOrId === 'string') {
+    const ev = state.calendarEvents?.find(e => e.id === Number(meetingOrId));
+    url = ev?.join_url || `/api/meetings/join/${meetingOrId}`;
+    title = ev?.title || title;
+  }
+  showToast(`Connecting to ${title} via Google Meet gateway...`);
+  window.open(url, '_blank');
+}
+
+window.openDockedCallById = joinMeetingGateway;
+window.joinMeetingGateway = joinMeetingGateway;
+export function openDockedCall(meeting) {
+  joinMeetingGateway(meeting);
+}
+export function closeDockedCall() {
+  // Path A no-op
 }
 
 function setupGlobalSearch() {
@@ -1791,13 +2426,29 @@ function setupGlobalSearch() {
     const term = e.target.value.toLowerCase().trim();
     if (!term) return;
 
-    if (term.includes('my') || term.includes('mine')) switchView('view-personal');
-    else if (term.includes('global') || term.includes('team')) switchView('view-global');
-    else if (term.includes('task') || term.includes('sprint') || term.includes('board')) switchView('view-tasks');
-    else if (term.includes('vote') || term.includes('ballot') || term.includes('peer')) switchView('view-voting');
-    else if (term.includes('cal') || term.includes('meet') || term.includes('dead')) switchView('view-calendar');
-    else if (term.includes('ticket') || term.includes('access')) switchView('view-governance');
-    else if (term.includes('audit') || term.includes('log')) switchView('view-audit');
+    if (term.includes('my') || term.includes('mine')) {
+      switchView('view-tasks');
+      document.getElementById('tab-tasks-mine')?.click();
+    } else if (term.includes('all') || term.includes('task') || term.includes('sprint') || term.includes('board')) {
+      switchView('view-tasks');
+      document.getElementById('tab-tasks-all')?.click();
+    } else if (term.includes('vote') || term.includes('ballot') || term.includes('peer') || term.includes('review')) {
+      switchView('view-voting');
+    } else if (term.includes('cal') || term.includes('meet') || term.includes('call') || term.includes('room')) {
+      switchView('view-callroom');
+    } else if (term.includes('roster') || term.includes('team') || term.includes('directory')) {
+      switchView('view-settings');
+      document.querySelector('#settings-subtabs [data-subtab="directory"]')?.click();
+    } else if (term.includes('permission') || term.includes('ticket') || term.includes('access')) {
+      switchView('view-settings');
+      document.querySelector('#settings-subtabs [data-subtab="permissions"]')?.click();
+    } else if (term.includes('audit') || term.includes('history') || term.includes('log')) {
+      switchView('view-settings');
+      document.querySelector('#settings-subtabs [data-subtab="history"]')?.click();
+    } else if (term.includes('snapshot') || term.includes('backup') || term.includes('data')) {
+      switchView('view-settings');
+      document.querySelector('#settings-subtabs [data-subtab="snapshot"]')?.click();
+    }
   });
 
   document.addEventListener('keydown', (e) => {
@@ -1807,7 +2458,7 @@ function setupGlobalSearch() {
     }
   });
 
-  const auditFilter = document.getElementById('audit-filter-input');
+  const auditFilter = document.getElementById('audit-search-input');
   auditFilter?.addEventListener('input', (e) => {
     state.auditSearchTerm = e.target.value;
     renderAuditTrail();
@@ -1827,8 +2478,42 @@ function setupEventListeners() {
   document.getElementById('btn-claim-blind-token')?.addEventListener('click', claimBlindToken);
   document.getElementById('form-submit-ballot')?.addEventListener('submit', castAnonymousBallot);
   document.getElementById('btn-host-close-voting')?.addEventListener('click', hostCloseVotingSession);
+  document.getElementById('btn-host-reopen-voting')?.addEventListener('click', hostReopenVotingSession);
   document.getElementById('btn-refresh-audit')?.addEventListener('click', loadAuditTrail);
   document.getElementById('btn-trigger-backup-snap')?.addEventListener('click', triggerDisasterBackup);
+
+  // Client data exports
+  document.getElementById('btn-export-tasks-json')?.addEventListener('click', () => {
+    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state.tasks, null, 2));
+    const dl = document.createElement('a');
+    dl.setAttribute("href", dataStr);
+    dl.setAttribute("download", `frontier_tasks_${new Date().toISOString().slice(0,10)}.json`);
+    dl.click();
+    showToast('Tasks exported as JSON');
+  });
+
+  document.getElementById('btn-export-audit-csv')?.addEventListener('click', () => {
+    if (!state.auditEvents || state.auditEvents.length === 0) {
+      showToast('No activity history to export', true);
+      return;
+    }
+    const headers = ["ID", "Timestamp", "Actor", "Action", "Target", "Severity", "Details"];
+    const rows = state.auditEvents.map(e => [
+      e.id,
+      `"${e.timestamp || ''}"`,
+      `"${e.actor_name || ''}"`,
+      `"${e.action || ''}"`,
+      `"${e.target || ''}"`,
+      `"${e.severity || ''}"`,
+      `"${(e.details || '').replace(/"/g, '""')}"`
+    ]);
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+    const dl = document.createElement('a');
+    dl.setAttribute("href", encodeURI(csvContent));
+    dl.setAttribute("download", `frontier_activity_${new Date().toISOString().slice(0,10)}.csv`);
+    dl.click();
+    showToast('Activity log exported as CSV');
+  });
 }
 
 // Start app

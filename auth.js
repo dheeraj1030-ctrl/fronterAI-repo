@@ -1,6 +1,16 @@
 import crypto from 'node:crypto';
 
-const HMAC_SECRET = process.env.VOTING_SECRET || 'frontier_ai_blind_token_hmac_2026_secure';
+// In production, require VOTING_SECRET to be explicitly configured.
+// In development, fall back to an ephemeral random key if not configured,
+// warning the developer so that a committed static key is never used.
+let HMAC_SECRET = process.env.VOTING_SECRET;
+if (!HMAC_SECRET) {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('FATAL: VOTING_SECRET environment variable is required in production.');
+  }
+  console.warn('⚠️ [SECURITY WARNING] VOTING_SECRET is not set in environment. Auto-generating ephemeral random key for development.');
+  HMAC_SECRET = crypto.randomBytes(32).toString('hex');
+}
 
 /**
  * Generates an unlinked blind ballot token for a specific voting session.

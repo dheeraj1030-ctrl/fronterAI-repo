@@ -108,6 +108,16 @@ export function initDatabase() {
       FOREIGN KEY (option_id) REFERENCES voting_options (id)
     );
 
+    -- Persistent User Authentication Sessions
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      member_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY (member_id) REFERENCES members (id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token);
+
     -- 2-Man Rule Access-Request Tickets
     CREATE TABLE IF NOT EXISTS access_tickets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +144,20 @@ export function initDatabase() {
       target TEXT NOT NULL,
       details TEXT,
       status TEXT NOT NULL
+    );
+
+    -- Peer-to-Peer Tasklets (Member-to-Member informal micro-tasks)
+    CREATE TABLE IF NOT EXISTS tasklets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sender_id INTEGER NOT NULL,
+      receiver_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING', -- 'PENDING', 'ACCEPTED', 'DONE'
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (sender_id) REFERENCES members (id),
+      FOREIGN KEY (receiver_id) REFERENCES members (id)
     );
   `);
 
@@ -179,6 +203,8 @@ export function seedMeetingSlots() {
 export function seedData() {
   // Clear old seed if re-running (delete child tables before parent tables)
   db.exec(`
+    DELETE FROM tasklets;
+    DELETE FROM sessions;
     DELETE FROM ballots;
     DELETE FROM used_tokens;
     DELETE FROM voting_eligibility;
@@ -257,7 +283,6 @@ export function seedData() {
   for (const ev of events) {
     insertCal.run(...ev);
   }
-
   // Log system initialization in audit
   db.prepare(`
     INSERT INTO audit_events (timestamp, actor_handle, action, target, details, status)
