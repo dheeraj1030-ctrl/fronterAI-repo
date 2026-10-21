@@ -809,33 +809,48 @@ ${(slots.results || []).map(s => `- ${s.slot_name} (${s.slot_code})`).join('\n')
 Be concise, authoritative, and grounded in the workspace data. Answer in plain text without markdown.`;
 
       let modelReply = '';
+      let groqDiagnostic = null;
 
-      // Call Groq (Llama 3.3 70B)
-      if (env.GROQ_API_KEY) {
-        try {
-          const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-            method: 'POST',
-            headers: {
-              'Authorization': `Bearer ${env.GROQ_API_KEY}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              model: 'llama-3.3-70b-versatile',
-              messages: [
-                { role: 'system', content: systemPrompt },
-                { role: 'user', content: message }
-              ],
-              max_tokens: 1024,
-              temperature: 0.3
-            })
-          });
-          const groqData = await groqRes.json();
-          modelReply = groqData.choices?.[0]?.message?.content || '';
-          if (!modelReply && groqData.error) {
-            console.error('Groq error:', groqData.error);
+      const groqKey = env.GROQ_API_KEY ? env.GROQ_API_KEY.trim() : null;
+
+      if (!groqKey) {
+        groqDiagnostic = 'GROQ_API_KEY is not defined in Cloudflare Worker environment variables.';
+      } else {
+        // Try llama-3.3-70b-versatile first, fallback to llama-3.1-8b-instant
+        const modelsToTry = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+        for (const modelName of modelsToTry) {
+          try {
+            const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+              method: 'POST',
+              headers: {
+                'Authorization': `Bearer ${groqKey}`,
+                'Content-Type': 'application/json'
+              },
+              body: JSON.stringify({
+                model: modelName,
+                messages: [
+                  { role: 'system', content: systemPrompt },
+                  { role: 'user', content: message }
+                ],
+                max_tokens: 1024,
+                temperature: 0.3
+              })
+            });
+
+            const groqData = await groqRes.json();
+            if (groqRes.ok && groqData.choices?.[0]?.message?.content) {
+              modelReply = groqData.choices[0].message.content;
+              break;
+            } else if (groqData.error) {
+              groqDiagnostic = `Groq (${modelName}) Error ${groqRes.status}: ${groqData.error.message || JSON.stringify(groqData.error)}`;
+              console.error('Groq error:', groqData.error);
+            } else {
+              groqDiagnostic = `Groq HTTP ${groqRes.status}`;
+            }
+          } catch (e) {
+            groqDiagnostic = `Groq fetch error: ${e.message}`;
+            console.error('Groq fetch error:', e);
           }
-        } catch (e) {
-          console.error('Groq fetch error:', e);
         }
       }
 
@@ -844,12 +859,14 @@ Be concise, authoritative, and grounded in the workspace data. Answer in plain t
         const lower = message.toLowerCase();
         if (lower.includes('task') || lower.includes('todo') || lower.includes('sprint')) {
           modelReply = `Active workspace tasks:\n` +
-            (tasks.results || []).map(t => `• ${t.title} — ${t.status} (${t.track})`).join('\n');
+            (tasks.results || []).map(t => `• ${t.title} — ${t.status} (${t.track})`).join('\n') +
+            (groqDiagnostic ? `\n\n[Diagnostic Notice: ${groqDiagnostic}]` : '');
         } else if (lower.includes('meet') || lower.includes('call') || lower.includes('bridge')) {
           modelReply = `Frontier AI has ${(slots.results || []).length} Google Meet bridges:\n` +
-            (slots.results || []).map(s => `• ${s.slot_name} (${s.slot_code})`).join('\n');
+            (slots.results || []).map(s => `• ${s.slot_name} (${s.slot_code})`).join('\n') +
+            (groqDiagnostic ? `\n\n[Diagnostic Notice: ${groqDiagnostic}]` : '');
         } else {
-          modelReply = `I am Frontier Oracle running on Cloudflare Edge. You have ${(tasks.results || []).length} sprint tasks active. Add your GROQ_API_KEY in Cloudflare Settings for full AI responses.`;
+          modelReply = `I am Frontier Oracle running on Cloudflare Edge.\n\n⚠️ ${groqDiagnostic || 'Unable to connect to Groq AI service.'}\n\nYou have ${(tasks.results || []).length} sprint tasks active.`;
         }
       }
 

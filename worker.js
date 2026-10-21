@@ -1,5 +1,5 @@
 // ==============================================================================
-// FRONTIER AI — CLOUDFLARE WORKER & STATIC ASSETS ENTRY POINT (v1.0.1)
+// FRONTIER AI — CLOUDFLARE WORKER & STATIC ASSETS ENTRY POINT (v1.0.2)
 // ==============================================================================
 
 import { onRequest } from './functions/api/[[catchall]].js';
