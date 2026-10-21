@@ -12,7 +12,7 @@ pages_build_output_dir = "./public"
 [[d1_databases]]
 binding = "DB"
 database_name = "frontier-production-db"
-database_id = "YOUR_D1_DATABASE_ID_HERE"
+database_id = "6f92a95b-b7eb-459f-9d75-1ae9a037d1c7"
 
 # Environment Variables (Non-sensitive)
 [vars]
