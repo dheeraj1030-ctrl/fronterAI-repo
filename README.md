@@ -117,6 +117,8 @@ FrontierAI/
 ├── package.json                     # Project manifest (ES Modules, zero dependencies)
 ├── frontier.db                      # Local SQLite database file (WAL enabled)
 ├── .env.example                     # Environment template with security key instructions
+├── schema.sql                       # Cloudflare D1 serverless SQLite schema & initial seed
+├── wrangler.toml                    # Cloudflare Pages and D1 database binding configuration
 ├── backups/                         # Sanitized JSON snapshots exported for disaster recovery
 ├── frontier_ai_architecture_checkpoint.md  # Architectural specification reference
 │
@@ -152,7 +154,8 @@ FrontierAI/
 │   ├── 04_CRYPTOGRAPHIC_PEER_REVIEW.md # Blind HMAC protocol & templates
 │   ├── 05_CALL_ROOM_AND_EMBEDDED_MEET.md # Meeting slots & companion gateway
 │   ├── 06_DEPLOYMENT_AND_MIGRATION_GUIDE.md # Cloudflare Pages/Workers/D1 deployment
-│   └── 07_AI_ORACLE_MEMORY_AND_MODULAR_ARCHITECTURE.md # AI Oracle, Memory & Modular spec
+│   ├── 07_AI_ORACLE_MEMORY_AND_MODULAR_ARCHITECTURE.md # AI Oracle, Memory & Modular spec
+│   └── 08_CLOUDFLARE_D1_HOSTING_GUIDE.md # Step-by-step Cloudflare Pages & D1 hosting guide
 │
 └── public/
     ├── index.html                   # Semantic HTML layout with Oracle AI view
