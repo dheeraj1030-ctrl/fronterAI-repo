@@ -1,6 +1,6 @@
 // ==============================================================================
-// FRONTIER AI — CLOUDFLARE PAGES FUNCTIONS EDGE ROUTER
-// Google OAuth 2.0 + Groq (Llama 3.3 70B) + Cloudflare D1
+// FRONTIER AI — CLOUDFLARE WORKER & PAGES FUNCTIONS EDGE ROUTER
+// Google OAuth 2.0 + Groq (Llama 3.3 70B) + Cloudflare D1 Serverless SQLite
 // ==============================================================================
 
 function jsonResponse(data, status = 200, headers = {}) {
@@ -41,6 +41,28 @@ async function sha256(message) {
   return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+async function ensureSchema(env) {
+  if (!env.DB) return;
+  try {
+    await env.DB.prepare(`
+      CREATE TABLE IF NOT EXISTS sessions (
+        token TEXT PRIMARY KEY,
+        member_id INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        expires_at TEXT NOT NULL
+      )
+    `).run();
+  } catch (e) {}
+
+  try {
+    await env.DB.prepare('ALTER TABLE members ADD COLUMN google_sub TEXT').run();
+  } catch (e) {}
+
+  try {
+    await env.DB.prepare('ALTER TABLE members ADD COLUMN email TEXT').run();
+  } catch (e) {}
+}
+
 async function getAuthMember(request, env) {
   const cookies = parseCookies(request);
   const token = cookies.frontier_session;
@@ -51,7 +73,7 @@ async function getAuthMember(request, env) {
     ).bind(token).first();
     if (!session) return null;
     return await env.DB.prepare(
-      'SELECT id, google_sub, email, handle, name, role, team_track, is_host, is_allowed FROM members WHERE id = ? AND is_allowed = 1'
+      'SELECT * FROM members WHERE id = ? AND is_allowed = 1'
     ).bind(session.member_id).first() || null;
   } catch (err) {
     console.error('Session auth error:', err);
@@ -65,7 +87,9 @@ async function logAudit(env, actorHandle, action, target, details, status = 'SUC
     await env.DB.prepare(
       "INSERT INTO audit_events (timestamp, actor_handle, action, target, details, status) VALUES (datetime('now'), ?, ?, ?, ?, ?)"
     ).bind(actorHandle, action, target, details, status).run();
-  } catch (e) { console.error('Audit log error:', e); }
+  } catch (e) {
+    console.error('Audit log error:', e);
+  }
 }
 
 export async function onRequest(context) {
@@ -75,17 +99,39 @@ export async function onRequest(context) {
   const method = request.method;
   const cookies = parseCookies(request);
 
-  if (!env.DB) {
-    return jsonResponse({ error: 'Cloudflare D1 binding [DB] is missing. Please add it in Pages Settings > Bindings.' }, 500);
+  // CORS Preflight
+  if (method === 'OPTIONS') {
+    return new Response(null, {
+      status: 204,
+      headers: {
+        'Access-Control-Allow-Origin': '*',
+        'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization'
+      }
+    });
   }
+
+  if (!env.DB) {
+    return jsonResponse({
+      error: 'Cloudflare D1 binding [DB] is missing. Please add it in Cloudflare Worker Settings > Bindings.'
+    }, 500);
+  }
+
+  // Ensure sessions and auth columns exist
+  await ensureSchema(env);
 
   try {
     // --------------------------------------------------------------------------
-    // 1. AUTH — SESSION CHECK
+    // 1. AUTH — SESSION CHECK & ROSTER
     // --------------------------------------------------------------------------
-    if (pathname === '/api/auth/session' && method === 'GET') {
+    if ((pathname === '/api/auth/current' || pathname === '/api/auth/session') && method === 'GET') {
       const member = await getAuthMember(request, env);
-      return jsonResponse({ authenticated: !!member, member: member || null });
+      return jsonResponse({
+        authenticated: !!member,
+        member: member || null,
+        user: member || null,
+        oauthConfigured: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET)
+      });
     }
 
     // --------------------------------------------------------------------------
@@ -150,14 +196,35 @@ export async function onRequest(context) {
       const googleSub = googleUser.sub;
       const googleEmail = googleUser.email;
 
-      // Allowlist check: by google_sub (returning user) OR email (first login)
-      let member = await env.DB.prepare('SELECT * FROM members WHERE google_sub = ?').bind(googleSub).first();
-      if (!member) {
-        member = await env.DB.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?) AND is_allowed = 1').bind(googleEmail).first();
-        // First login: bind google_sub to the email record
-        if (member) {
-          await env.DB.prepare('UPDATE members SET google_sub = ? WHERE id = ?').bind(googleSub, member.id).run();
-        }
+      // Allowlist check:
+      // 1. By google_sub (returning user)
+      let member = null;
+      try {
+        member = await env.DB.prepare('SELECT * FROM members WHERE google_sub = ?').bind(googleSub).first();
+      } catch (e) {}
+
+      // 2. By email (first login)
+      if (!member && googleEmail) {
+        try {
+          member = await env.DB.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?) AND is_allowed = 1').bind(googleEmail).first();
+        } catch (e) {}
+      }
+
+      // 3. Fallback: Host account owner binding if email not yet set in database
+      if (!member && googleEmail && (googleEmail.toLowerCase() === 'kart123.san@gmail.com' || googleEmail.toLowerCase().includes('kart123.san'))) {
+        try {
+          member = await env.DB.prepare('SELECT * FROM members WHERE id = 1 AND is_allowed = 1').first();
+          if (member) {
+            try {
+              await env.DB.prepare('UPDATE members SET email = ?, google_sub = ? WHERE id = ?').bind(googleEmail, googleSub, member.id).run();
+            } catch (err) {}
+          }
+        } catch (e) {}
+      } else if (member && googleSub) {
+        // Update google_sub and email if needed
+        try {
+          await env.DB.prepare('UPDATE members SET google_sub = COALESCE(google_sub, ?), email = COALESCE(email, ?) WHERE id = ?').bind(googleSub, googleEmail || null, member.id).run();
+        } catch (e) {}
       }
 
       if (!member || !member.is_allowed) {
@@ -192,8 +259,78 @@ export async function onRequest(context) {
     }
 
     // --------------------------------------------------------------------------
-    // 3. DASHBOARD & STATS
+    // 3. DASHBOARD (PERSONAL & STATS)
     // --------------------------------------------------------------------------
+    if (pathname === '/api/dashboard/personal' && method === 'GET') {
+      const member = await getAuthMember(request, env);
+      if (!member) return jsonResponse({ error: 'Authentication required' }, 401);
+
+      const tasksRes = await env.DB.prepare(`
+        SELECT t.*, m.name as assignee_name
+        FROM tasks t
+        LEFT JOIN members m ON t.assignee_id = m.id
+        WHERE t.assignee_id = ?
+        ORDER BY t.id ASC
+      `).bind(member.id).all();
+      const myTasks = tasksRes.results || [];
+
+      const rawEventsRes = await env.DB.prepare(`
+        SELECT c.*, m.name as assignee_name, s.slot_name, s.slot_code
+        FROM calendar_events c
+        LEFT JOIN members m ON c.assignee_id = m.id
+        LEFT JOIN meeting_slots s ON c.meeting_slot_id = s.id
+        ORDER BY c.event_date ASC, c.id ASC
+      `).all();
+      const rawEvents = rawEventsRes.results || [];
+
+      const myEvents = rawEvents.filter(ev => {
+        if (member.is_host === 1) return true;
+        if (ev.target_audience === 'ALL') return true;
+        if (ev.target_audience === 'BACKEND' && member.team_track === 'backend') return true;
+        if (ev.target_audience === 'FRONTEND' && member.team_track === 'frontend') return true;
+        if (ev.assignee_id && ev.assignee_id === member.id) return true;
+        if (ev.assignee_id === null && !ev.target_audience) return true;
+        if (ev.target_audience && ev.target_audience.startsWith('[')) {
+          try {
+            const list = JSON.parse(ev.target_audience);
+            if (Array.isArray(list) && list.map(Number).includes(member.id)) return true;
+          } catch {}
+        }
+        return false;
+      }).map(ev => {
+        const hasMeet = !!(ev.meeting_link);
+        return {
+          ...ev,
+          meeting_link: hasMeet ? `/api/meetings/join/${ev.id}` : null,
+          join_url: hasMeet ? `/api/meetings/join/${ev.id}` : null
+        };
+      });
+
+      const liveMeeting = myEvents.find(ev => ev.is_live === 1 && (ev.event_type === 'MEETING' || ev.event_type === 'RETRO')) || null;
+      const activeVote = await env.DB.prepare('SELECT * FROM voting_sessions WHERE id = 1').first();
+      const hasVoted = await env.DB.prepare('SELECT * FROM voting_eligibility WHERE session_id = 1 AND member_id = ?').bind(member.id).first();
+
+      const completed = myTasks.filter(t => t.status === 'COMPLETED').length;
+      const inProgress = myTasks.filter(t => t.status === 'IN_PROGRESS').length;
+      const todo = myTasks.filter(t => t.status === 'TODO').length;
+
+      return jsonResponse({
+        user: member,
+        tasks: myTasks,
+        events: myEvents,
+        liveMeeting,
+        hasVoted: !!hasVoted,
+        votingSession: activeVote || null,
+        stats: {
+          total: myTasks.length,
+          completed,
+          inProgress,
+          todo,
+          completionRate: myTasks.length > 0 ? Math.round((completed / myTasks.length) * 100) : 0
+        }
+      });
+    }
+
     if (pathname === '/api/dashboard/stats' && method === 'GET') {
       const member = await getAuthMember(request, env);
       const memberId = member ? member.id : 1;
@@ -213,12 +350,32 @@ export async function onRequest(context) {
     // 4. MEMBERS ROSTER
     // --------------------------------------------------------------------------
     if (pathname === '/api/members' && method === 'GET') {
-      const res = await env.DB.prepare('SELECT id, handle, name, role, team_track, is_host, is_allowed FROM members WHERE is_allowed = 1').all();
+      const res = await env.DB.prepare('SELECT id, handle, name, role, team_track, is_host, is_allowed, email FROM members WHERE is_allowed = 1').all();
       return jsonResponse({ members: res.results || [] });
     }
 
+    if (pathname === '/api/members' && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Only Team Lead can register members' }, 403);
+      const { handle, name, role, team_track, email } = await request.json();
+      const res = await env.DB.prepare(
+        'INSERT INTO members (handle, name, role, team_track, email, is_host, is_allowed) VALUES (?, ?, ?, ?, ?, 0, 1)'
+      ).bind(handle, name, role || 'Engineer', team_track || 'backend', email || null).run();
+      await logAudit(env, member.handle, 'MEMBER_ADD', 'members', `Added ${name} (@${handle})`);
+      return jsonResponse({ success: true, id: res.meta?.last_row_id }, 201);
+    }
+
+    if (pathname.startsWith('/api/members/') && method === 'DELETE') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Only Team Lead can remove members' }, 403);
+      const targetId = pathname.split('/')[3];
+      await env.DB.prepare('UPDATE members SET is_allowed = 0 WHERE id = ?').bind(targetId).run();
+      await logAudit(env, member.handle, 'MEMBER_REMOVE', 'members', `Revoked access for member #${targetId}`);
+      return jsonResponse({ success: true });
+    }
+
     // --------------------------------------------------------------------------
-    // 5. TASKS BOARD
+    // 5. TASKS BOARD & DELIVERABLES
     // --------------------------------------------------------------------------
     if (pathname === '/api/tasks' && method === 'GET') {
       const res = await env.DB.prepare(`
@@ -260,67 +417,203 @@ export async function onRequest(context) {
       return jsonResponse({ success: true });
     }
 
+    if (pathname.startsWith('/api/tasks/') && method === 'DELETE') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Unauthorized' }, 403);
+      const taskId = pathname.split('/')[3];
+      await env.DB.prepare('DELETE FROM tasks WHERE id = ?').bind(taskId).run();
+      await logAudit(env, member.handle, 'TASK_DELETE', 'tasks', `Task #${taskId} deleted`);
+      return jsonResponse({ success: true });
+    }
+
     // --------------------------------------------------------------------------
     // 6. MEETINGS & BRIDGES
     // --------------------------------------------------------------------------
     if (pathname === '/api/meetings/slots' && method === 'GET') {
-      const res = await env.DB.prepare('SELECT id, slot_code, slot_name, last_used_at FROM meeting_slots').all();
+      const res = await env.DB.prepare('SELECT id, slot_code, slot_name, raw_url, last_used_at FROM meeting_slots').all();
       return jsonResponse({ slots: res.results || [] });
     }
 
     if (pathname.startsWith('/api/meetings/join/') && method === 'GET') {
       const member = await getAuthMember(request, env);
       if (!member) return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?error=unauthorized` } });
-      const slotId = pathname.split('/')[4];
-      const slot = await env.DB.prepare('SELECT * FROM meeting_slots WHERE id = ?').bind(slotId).first();
-      if (!slot) return jsonResponse({ error: 'Slot not found' }, 404);
-      await env.DB.prepare("UPDATE meeting_slots SET last_used_at = datetime('now') WHERE id = ?").bind(slotId).run();
-      await logAudit(env, member.handle, 'MEETING_JOIN', 'meetings', `Joined ${slot.slot_name}`);
-      return new Response(null, { status: 302, headers: { 'Location': slot.raw_url } });
+      const targetId = pathname.split('/')[4];
+      // Check if target is a calendar event id or a direct slot id
+      let rawUrl = null;
+      let slotName = 'Meeting Bridge';
+      const ev = await env.DB.prepare('SELECT * FROM calendar_events WHERE id = ?').bind(targetId).first();
+      if (ev && ev.meeting_link) {
+        rawUrl = ev.meeting_link;
+        slotName = ev.title;
+      } else {
+        const slot = await env.DB.prepare('SELECT * FROM meeting_slots WHERE id = ? OR slot_code = ?').bind(targetId, targetId).first();
+        if (slot) {
+          rawUrl = slot.raw_url;
+          slotName = slot.slot_name;
+        }
+      }
+
+      if (!rawUrl) return jsonResponse({ error: 'Meeting link not found' }, 404);
+      await logAudit(env, member.handle, 'MEETING_JOIN', 'meetings', `Joined ${slotName}`);
+      return new Response(null, { status: 302, headers: { 'Location': rawUrl } });
     }
 
     // --------------------------------------------------------------------------
     // 7. CALENDAR
     // --------------------------------------------------------------------------
-    if (pathname === '/api/calendar/events' && method === 'GET') {
+    if ((pathname === '/api/calendar' || pathname === '/api/calendar/events') && method === 'GET') {
+      const memberId = url.searchParams.get('member_id');
       const res = await env.DB.prepare(`
-        SELECT c.*, m.handle as creator_handle, s.slot_name
+        SELECT c.*, m.name as assignee_name, m.handle as creator_handle, s.slot_name, s.slot_code
         FROM calendar_events c
-        LEFT JOIN members m ON c.created_by = m.id
+        LEFT JOIN members m ON c.assignee_id = m.id
         LEFT JOIN meeting_slots s ON c.meeting_slot_id = s.id
-        ORDER BY c.event_date ASC
+        ORDER BY c.event_date ASC, c.id ASC
       `).all();
-      return jsonResponse({ events: res.results || [] });
+
+      let events = (res.results || []).map(ev => {
+        const hasMeet = !!(ev.meeting_link);
+        return {
+          ...ev,
+          meeting_link: hasMeet ? `/api/meetings/join/${ev.id}` : null,
+          join_url: hasMeet ? `/api/meetings/join/${ev.id}` : null
+        };
+      });
+
+      if (memberId) {
+        const mId = parseInt(memberId, 10);
+        const targetMember = await env.DB.prepare('SELECT * FROM members WHERE id = ?').bind(mId).first();
+        if (targetMember) {
+          events = events.filter(ev => {
+            if (targetMember.is_host === 1) return true;
+            if (ev.target_audience === 'ALL') return true;
+            if (ev.target_audience === 'BACKEND' && targetMember.team_track === 'backend') return true;
+            if (ev.target_audience === 'FRONTEND' && targetMember.team_track === 'frontend') return true;
+            if (ev.assignee_id && ev.assignee_id === targetMember.id) return true;
+            return false;
+          });
+        }
+      }
+
+      return jsonResponse({ events });
+    }
+
+    if (pathname === '/api/calendar' && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Permission Denied: Only Team Lead can schedule events.' }, 403);
+      const body = await request.json();
+      const { title, description, event_type, event_date, time_label, target_audience, assignee_id, meeting_slot_id } = body;
+      let meeting_link = null;
+      if (meeting_slot_id) {
+        const slot = await env.DB.prepare('SELECT raw_url FROM meeting_slots WHERE id = ?').bind(meeting_slot_id).first();
+        if (slot) meeting_link = slot.raw_url;
+      }
+      const res = await env.DB.prepare(`
+        INSERT INTO calendar_events (title, description, event_type, event_date, time_label, target_audience, assignee_id, meeting_slot_id, meeting_link, is_live, created_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+      `).bind(title, description || '', event_type || 'MEETING', event_date, time_label || '', target_audience || 'ALL', assignee_id || null, meeting_slot_id || null, meeting_link, member.id).run();
+      await logAudit(env, member.handle, 'SCHEDULE_EVENT', 'calendar', `Scheduled ${event_type}: ${title} on ${event_date}`);
+      return jsonResponse({ success: true, eventId: res.meta?.last_row_id }, 201);
+    }
+
+    if (pathname.startsWith('/api/calendar/') && pathname.endsWith('/ping') && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Unauthorized' }, 403);
+      const evId = pathname.split('/')[3];
+      await env.DB.prepare('UPDATE calendar_events SET is_live = 1 WHERE id = ?').bind(evId).run();
+      await logAudit(env, member.handle, 'MEETING_PING', 'calendar', `Started live meeting #${evId}`);
+      return jsonResponse({ success: true });
+    }
+
+    if (pathname.startsWith('/api/calendar/') && pathname.endsWith('/end') && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Unauthorized' }, 403);
+      const evId = pathname.split('/')[3];
+      await env.DB.prepare('UPDATE calendar_events SET is_live = 0 WHERE id = ?').bind(evId).run();
+      await logAudit(env, member.handle, 'MEETING_END', 'calendar', `Ended live meeting #${evId}`);
+      return jsonResponse({ success: true });
+    }
+
+    if (pathname.startsWith('/api/calendar/') && method === 'DELETE') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Unauthorized' }, 403);
+      const evId = pathname.split('/')[3];
+      await env.DB.prepare('DELETE FROM calendar_events WHERE id = ?').bind(evId).run();
+      await logAudit(env, member.handle, 'CALENDAR_DELETE', 'calendar', `Deleted event #${evId}`);
+      return jsonResponse({ success: true });
     }
 
     // --------------------------------------------------------------------------
     // 8. CRYPTOGRAPHIC BLIND PEER REVIEW (VOTING)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/voting/sessions' && method === 'GET') {
-      const sessions = await env.DB.prepare(`
-        SELECT s.*, count(b.id) as votes_cast FROM voting_sessions s
-        LEFT JOIN ballots b ON s.id = b.session_id GROUP BY s.id ORDER BY s.id DESC
-      `).all();
-      const options = await env.DB.prepare(`
-        SELECT o.*, m.name as candidate_name, m.handle as candidate_handle
-        FROM voting_options o LEFT JOIN members m ON o.candidate_member_id = m.id
-      `).all();
-      return jsonResponse({ sessions: sessions.results || [], options: options.results || [] });
+    if ((pathname === '/api/voting/current' || pathname === '/api/voting/sessions') && method === 'GET') {
+      const member = await getAuthMember(request, env);
+      const sessionId = parseInt(url.searchParams.get('session_id') || '1', 10);
+      let session = await env.DB.prepare('SELECT * FROM voting_sessions WHERE id = ?').bind(sessionId).first();
+      if (!session) session = await env.DB.prepare('SELECT * FROM voting_sessions ORDER BY id ASC LIMIT 1').first();
+      if (!session) return jsonResponse({ error: 'No voting session found' }, 404);
+
+      const allSessionsRes = await env.DB.prepare('SELECT id, title, description, session_type, status FROM voting_sessions ORDER BY id ASC').all();
+      const optionsRes = await env.DB.prepare(`
+        SELECT vo.*, m.name as candidate_name, m.role as candidate_role
+        FROM voting_options vo
+        LEFT JOIN members m ON vo.candidate_member_id = m.id
+        WHERE vo.session_id = ?
+      `).bind(session.id).all();
+      const options = optionsRes.results || [];
+
+      const eligibility = member
+        ? await env.DB.prepare('SELECT * FROM voting_eligibility WHERE session_id = ? AND member_id = ?').bind(session.id, member.id).first()
+        : null;
+
+      const ballotsCount = await env.DB.prepare('SELECT COUNT(*) as count FROM ballots WHERE session_id = ?').bind(session.id).first();
+      const totalBallots = ballotsCount?.count || 0;
+      const totalEligible = session.total_eligible || 8;
+      const isRevealed = totalBallots >= totalEligible || session.status === 'CLOSED';
+
+      let tally = null;
+      if (isRevealed) {
+        tally = [];
+        for (const opt of options) {
+          const vCount = await env.DB.prepare('SELECT COUNT(*) as count FROM ballots WHERE session_id = ? AND option_id = ?').bind(session.id, opt.id).first();
+          tally.push({
+            option_id: opt.id,
+            label: opt.label,
+            candidate_name: opt.candidate_name,
+            votes: vCount?.count || 0
+          });
+        }
+      }
+
+      return jsonResponse({
+        session,
+        allSessions: allSessionsRes.results || [session],
+        options,
+        userHasClaimedToken: !!eligibility,
+        totalBallots,
+        totalEligible,
+        isRevealed,
+        isHost: !!(member && member.is_host),
+        tally
+      });
     }
 
-    if (pathname === '/api/voting/collect-token' && method === 'POST') {
+    if ((pathname === '/api/voting/token' || pathname === '/api/voting/collect-token') && method === 'POST') {
       const member = await getAuthMember(request, env);
-      if (!member) return jsonResponse({ error: 'Unauthorized' }, 401);
-      const { session_id } = await request.json();
-      const session = await env.DB.prepare("SELECT * FROM voting_sessions WHERE id = ? AND status = 'ACTIVE'").bind(session_id).first();
-      if (!session) return jsonResponse({ error: 'Voting session not active' }, 400);
-      const alreadyClaimed = await env.DB.prepare('SELECT * FROM voting_eligibility WHERE session_id = ? AND member_id = ?').bind(session_id, member.id).first();
-      if (alreadyClaimed) return jsonResponse({ error: 'Ballot token already claimed' }, 400);
-      await env.DB.prepare("INSERT INTO voting_eligibility (session_id, member_id, token_issued_at) VALUES (?, ?, datetime('now'))").bind(session_id, member.id).run();
+      if (!member) return jsonResponse({ error: 'Authentication required' }, 401);
+      const body = await request.json();
+      const sessionId = body.session_id || 1;
+      const session = await env.DB.prepare("SELECT * FROM voting_sessions WHERE id = ? AND status = 'ACTIVE'").bind(sessionId).first();
+      if (!session) return jsonResponse({ error: 'Voting session is not active' }, 400);
+
+      const alreadyClaimed = await env.DB.prepare('SELECT * FROM voting_eligibility WHERE session_id = ? AND member_id = ?').bind(sessionId, member.id).first();
+      if (alreadyClaimed) return jsonResponse({ error: 'You have already claimed a ballot token for this session.' }, 400);
+
+      await env.DB.prepare("INSERT INTO voting_eligibility (session_id, member_id, token_issued_at) VALUES (?, ?, datetime('now'))").bind(sessionId, member.id).run();
       const nonce = crypto.randomUUID();
-      const message = `${session_id}:${nonce}`;
+      const message = `${sessionId}:${nonce}`;
       const signature = await hmacSha256(env.VOTING_SECRET || 'secret-salt-key-minimum-32-chars', message);
-      await logAudit(env, member.handle, 'VOTE_CLAIM_TOKEN', 'voting', `Blind token claimed for Session #${session_id}`);
+      await logAudit(env, member.handle, 'VOTE_CLAIM_TOKEN', 'voting', `Blind token claimed for Session #${sessionId}`);
       return jsonResponse({ token: `${message}:${signature}` });
     }
 
@@ -342,6 +635,24 @@ export async function onRequest(context) {
       return jsonResponse({ success: true });
     }
 
+    if (pathname === '/api/voting/close' && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Unauthorized' }, 403);
+      const { session_id } = await request.json();
+      await env.DB.prepare("UPDATE voting_sessions SET status = 'CLOSED' WHERE id = ?").bind(session_id || 1).run();
+      await logAudit(env, member.handle, 'CLOSE_VOTING', 'voting', `Closed session #${session_id}`);
+      return jsonResponse({ success: true });
+    }
+
+    if (pathname === '/api/voting/reopen' && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Unauthorized' }, 403);
+      const { session_id } = await request.json();
+      await env.DB.prepare("UPDATE voting_sessions SET status = 'ACTIVE' WHERE id = ?").bind(session_id || 1).run();
+      await logAudit(env, member.handle, 'REOPEN_VOTING', 'voting', `Reopened session #${session_id}`);
+      return jsonResponse({ success: true });
+    }
+
     // --------------------------------------------------------------------------
     // 9. PEER TASKLETS
     // --------------------------------------------------------------------------
@@ -356,28 +667,111 @@ export async function onRequest(context) {
       return jsonResponse({ tasklets: res.results || [] });
     }
 
+    if (pathname === '/api/tasklets' && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member) return jsonResponse({ error: 'Unauthorized' }, 401);
+      const { receiver_id, title, description } = await request.json();
+      const res = await env.DB.prepare(
+        "INSERT INTO tasklets (sender_id, receiver_id, title, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'PENDING', datetime('now'), datetime('now'))"
+      ).bind(member.id, receiver_id, title, description || '').run();
+      await logAudit(env, member.handle, 'TASKLET_CREATE', 'tasklets', `Sent tasklet "${title}"`);
+      return jsonResponse({ success: true, id: res.meta?.last_row_id }, 201);
+    }
+
+    if (pathname.startsWith('/api/tasklets/') && method === 'PATCH') {
+      const member = await getAuthMember(request, env);
+      if (!member) return jsonResponse({ error: 'Unauthorized' }, 401);
+      const id = pathname.split('/')[3];
+      const { status } = await request.json();
+      await env.DB.prepare("UPDATE tasklets SET status = ?, updated_at = datetime('now') WHERE id = ?").bind(status, id).run();
+      return jsonResponse({ success: true });
+    }
+
     // --------------------------------------------------------------------------
-    // 10. GOVERNANCE TICKETS
+    // 10. GOVERNANCE ACCESS TICKETS (2-MAN RULE)
     // --------------------------------------------------------------------------
-    if (pathname === '/api/governance/tickets' && method === 'GET') {
+    if ((pathname === '/api/tickets' || pathname === '/api/governance/tickets') && method === 'GET') {
       const res = await env.DB.prepare(`
-        SELECT a.*, r.handle as requester_handle, ap.handle as approver_handle
-        FROM access_tickets a LEFT JOIN members r ON a.requester_id = r.id LEFT JOIN members ap ON a.approver_id = ap.id
+        SELECT a.*, r.name as requester_name, r.handle as requester_handle,
+               ap.name as approver_name, ap.handle as approver_handle
+        FROM access_tickets a
+        LEFT JOIN members r ON a.requester_id = r.id
+        LEFT JOIN members ap ON a.approver_id = ap.id
         ORDER BY a.id DESC
       `).all();
       return jsonResponse({ tickets: res.results || [] });
     }
 
-    // --------------------------------------------------------------------------
-    // 11. AUDIT LOGS
-    // --------------------------------------------------------------------------
-    if (pathname === '/api/audit/logs' && method === 'GET') {
-      const res = await env.DB.prepare('SELECT * FROM audit_events ORDER BY id DESC LIMIT 100').all();
-      return jsonResponse({ logs: res.results || [] });
+    if ((pathname === '/api/tickets' || pathname === '/api/governance/tickets') && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member) return jsonResponse({ error: 'Authentication required' }, 401);
+      const body = await request.json();
+      const { title, reason, scope, duration_minutes } = body;
+      const res = await env.DB.prepare(`
+        INSERT INTO access_tickets (requester_id, title, reason, scope, duration_minutes, status, created_at)
+        VALUES (?, ?, ?, ?, ?, 'PENDING_APPROVAL', datetime('now'))
+      `).bind(member.id, title, reason, scope, duration_minutes || 30).run();
+      await logAudit(env, member.handle, 'RAISE_TICKET', 'governance', `Created ticket "${title}"`);
+      return jsonResponse({ success: true, id: res.meta?.last_row_id }, 201);
+    }
+
+    if (pathname.startsWith('/api/tickets/') && pathname.endsWith('/approve') && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member) return jsonResponse({ error: 'Authentication required' }, 401);
+      const ticketId = parseInt(pathname.split('/')[3], 10);
+      const ticket = await env.DB.prepare('SELECT * FROM access_tickets WHERE id = ?').bind(ticketId).first();
+      if (!ticket) return jsonResponse({ error: 'Ticket not found' }, 404);
+      if (ticket.status !== 'PENDING_APPROVAL') return jsonResponse({ error: `Ticket already ${ticket.status}` }, 400);
+      if (ticket.requester_id === member.id) {
+        await logAudit(env, member.handle, 'TICKET_APPROVE_VIOLATION', 'governance', `2-Man rule violation: tried to self-approve ticket #${ticketId}`, 'DENIED');
+        return jsonResponse({ error: '2-Man Rule Violation: You cannot approve your own access ticket.' }, 403);
+      }
+      await env.DB.prepare("UPDATE access_tickets SET status = 'APPROVED', approver_id = ?, resolved_at = datetime('now') WHERE id = ?").bind(member.id, ticketId).run();
+      await logAudit(env, member.handle, 'APPROVE_TICKET', 'governance', `Approved ticket #${ticketId}`);
+      return jsonResponse({ success: true, ticketId });
     }
 
     // --------------------------------------------------------------------------
-    // 12. FRONTIER ORACLE AI — GROQ (Llama 3.3 70B)
+    // 11. AUDIT LOGS
+    // --------------------------------------------------------------------------
+    if ((pathname === '/api/audit' || pathname === '/api/audit/logs') && method === 'GET') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Restricted to Team Lead' }, 403);
+      const res = await env.DB.prepare('SELECT * FROM audit_events ORDER BY id DESC LIMIT 100').all();
+      return jsonResponse({ events: res.results || [], logs: res.results || [] });
+    }
+
+    // --------------------------------------------------------------------------
+    // 12. DISASTER RECOVERY EXPORT
+    // --------------------------------------------------------------------------
+    if (pathname === '/api/disaster-recovery/export' && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Restricted to Team Lead' }, 403);
+      const members = await env.DB.prepare('SELECT * FROM members').all();
+      const tasks = await env.DB.prepare('SELECT * FROM tasks').all();
+      const slots = await env.DB.prepare('SELECT * FROM meeting_slots').all();
+      const events = await env.DB.prepare('SELECT * FROM calendar_events').all();
+      const audit = await env.DB.prepare('SELECT * FROM audit_events ORDER BY id DESC LIMIT 100').all();
+      return jsonResponse({
+        success: true,
+        filename: `snapshot_${Date.now()}.json`,
+        snapshot: {
+          platform: 'Frontier AI Cloudflare Edition',
+          timestamp: new Date().toISOString(),
+          exported_by: member.handle,
+          tables: {
+            members: members.results || [],
+            tasks: tasks.results || [],
+            meeting_slots: slots.results || [],
+            calendar_events: events.results || [],
+            audit_events: audit.results || []
+          }
+        }
+      });
+    }
+
+    // --------------------------------------------------------------------------
+    // 13. FRONTIER ORACLE AI — GROQ (Llama 3.3 70B)
     // --------------------------------------------------------------------------
     if (pathname === '/api/ai/chat' && method === 'POST') {
       const member = await getAuthMember(request, env);
@@ -400,7 +794,10 @@ export async function onRequest(context) {
       // Build Tier 1 context from D1
       const tasks = await env.DB.prepare('SELECT title, track, status, deadline FROM tasks LIMIT 10').all();
       const slots = await env.DB.prepare('SELECT slot_name, slot_code FROM meeting_slots LIMIT 6').all();
-      const memory = await env.DB.prepare('SELECT memory_data FROM member_memories WHERE member_id = ?').bind(memberId).first();
+      let memory = null;
+      try {
+        memory = await env.DB.prepare('SELECT memory_data FROM member_memories WHERE member_id = ?').bind(memberId).first();
+      } catch (e) {}
 
       const systemPrompt = `You are Frontier Oracle, the AI project assistant for the Frontier AI engineering workspace.
 Current User: ${member.name} (@${member.handle}) — ${member.role}
@@ -442,7 +839,7 @@ Be concise, authoritative, and grounded in the workspace data. Answer in plain t
         }
       }
 
-      // Intelligent offline fallback (no API key needed)
+      // Intelligent offline fallback
       if (!modelReply) {
         const lower = message.toLowerCase();
         if (lower.includes('task') || lower.includes('todo') || lower.includes('sprint')) {
@@ -466,6 +863,19 @@ Be concise, authoritative, and grounded in the workspace data. Answer in plain t
       if (!member) return jsonResponse({ error: 'Unauthorized' }, 401);
       const res = await env.DB.prepare('SELECT * FROM ai_threads WHERE member_id = ? ORDER BY id DESC').bind(member.id).all();
       return jsonResponse({ threads: res.results || [] });
+    }
+
+    if (pathname.match(/^\/api\/ai\/threads\/\d+\/messages$/) && method === 'GET') {
+      const member = await getAuthMember(request, env);
+      if (!member) return jsonResponse({ error: 'Unauthorized' }, 401);
+      const threadId = parseInt(pathname.split('/')[4], 10);
+      const thread = await env.DB.prepare('SELECT * FROM ai_threads WHERE id = ?').bind(threadId).first();
+      if (!thread) return jsonResponse({ error: 'Thread not found' }, 404);
+      if (thread.member_id !== member.id && !member.is_host) {
+        return jsonResponse({ error: 'Forbidden' }, 403);
+      }
+      const msgs = await env.DB.prepare('SELECT id, sender_role, content, created_at FROM ai_messages WHERE thread_id = ? ORDER BY id ASC').bind(threadId).all();
+      return jsonResponse({ thread, messages: msgs.results || [] });
     }
 
     return jsonResponse({ error: 'Not Found', path: pathname }, 404);

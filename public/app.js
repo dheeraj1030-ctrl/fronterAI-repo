@@ -433,9 +433,11 @@ function applyRolePermissions() {
 async function loadCurrentAuth() {
   try {
     const res = await fetch('/api/auth/current');
-    const data = await res.json();
-    state.currentUser = data.user;
-    updateHeaderUserChip();
+    if (res.ok) {
+      const data = await res.json();
+      state.currentUser = data.user || data.member || null;
+      updateHeaderUserChip();
+    }
   } catch (err) {
     console.error('Failed to load current auth:', err);
   }
@@ -476,11 +478,6 @@ function setupPersonaDropdown() {
       menu.classList.add('hidden');
     }
   });
-
-  document.getElementById('btn-simulate-mallory')?.addEventListener('click', async () => {
-    menu.classList.add('hidden');
-    await loginAs(9999);
-  });
 }
 
 function populatePersonaDropdown() {
@@ -488,29 +485,19 @@ function populatePersonaDropdown() {
   if (!container) return;
   container.innerHTML = '';
 
-  // Filter to strictly the 2 core demonstration roles
-  const demoMembers = state.members.filter(m => m.id === 1 || m.id === 2);
-
-  demoMembers.forEach(member => {
+  if (state.currentUser) {
     const row = document.createElement('div');
-    const isActive = state.currentUser && state.currentUser.id === member.id;
-    row.className = `persona-option ${isActive ? 'active' : ''}`;
+    row.className = 'persona-option active';
     row.innerHTML = `
-      <div class="user-avatar">${getInitials(member.name)}</div>
+      <div class="user-avatar">${getInitials(state.currentUser.name)}</div>
       <div class="persona-info-wrap">
-        <div class="persona-opt-name">${member.name} ${member.is_host ? '<span class="host-pill-tag">ADMIN</span>' : '<span class="nav-badge">NON-ADMIN</span>'}</div>
-        <div class="persona-opt-sub">${member.role} • @${member.handle}</div>
+        <div class="persona-opt-name">${state.currentUser.name} ${state.currentUser.is_host ? '<span class="host-pill-tag">LEAD</span>' : '<span class="nav-badge">MEMBER</span>'}</div>
+        <div class="persona-opt-sub">${state.currentUser.role} • ${state.currentUser.email || '@' + state.currentUser.handle}</div>
       </div>
-      ${isActive ? '<span class="persona-check">✓</span>' : ''}
+      <span class="persona-check">✓</span>
     `;
-
-    row.addEventListener('click', async () => {
-      document.getElementById('persona-dropdown-menu').classList.add('hidden');
-      await loginAs(member.handle);
-    });
-
     container.appendChild(row);
-  });
+  }
 }
 
 async function loginAs(identifier) {

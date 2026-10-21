@@ -49,26 +49,8 @@
         <span>Sign in with Google</span>
       </a>
 
-      <div class="auth-quick-select">
-        <div class="quick-select-title">Fast Switch Preview Accounts:</div>
-        
-        <div class="quick-pill-group">
-          <div class="role-group-label">Team Lead (Admin):</div>
-          <button class="btn-demo-pill pill-lead" data-id="10101">
-            <span><strong>Alice Vance</strong> (@alice_v)</span>
-            <span class="host-pill-tag">Lead</span>
-          </button>
-
-          <div class="role-group-label">Team Member (Participant):</div>
-          <button class="btn-demo-pill" data-id="10102">
-            <span><strong>Bob Ross</strong> (@bob_r)</span>
-            <span class="nav-badge">Member</span>
-          </button>
-        </div>
-      </div>
-
       <div class="auth-security-footer">
-        <span>Allowlist Enforced · 8 Registered Team Members</span>
+        <span>Allowlist Enforced · Team Members Only</span>
       </div>
     </div>
   </div>
@@ -116,20 +98,14 @@
           <svg class="chip-dropdown-arrow" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="6 9 12 15 18 9"></polyline></svg>
         </div>
 
-        <!-- Account / Persona Switcher Dropdown Modal/Card -->
+        <!-- Account / Profile Dropdown Menu -->
         <div id="persona-dropdown-menu" class="persona-menu hidden">
           <div class="persona-menu-header">
-            <h4>Frontier AI Team Accounts</h4>
-            <p>Switch between Team Lead and Member accounts</p>
+            <h4>Frontier AI Account</h4>
+            <p id="menu-user-subtitle">Signed in with Google</p>
           </div>
           <div class="persona-list" id="persona-list-items">
             <!-- Dynamically populated -->
-          </div>
-          <div class="persona-menu-footer">
-            <button id="btn-simulate-mallory" class="btn-negative-test">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-              Simulate Unauthorized Account (ID 9999)
-            </button>
           </div>
           <div class="persona-menu-signout">
             <button id="btn-header-signout" class="btn btn-outlined btn-block">Sign Out</button>
