@@ -11,13 +11,12 @@ main = "worker.js"
 directory = "./public"
 binding = "ASSETS"
 
-# Cloudflare D1 Database Binding
-[[d1_databases]]
-binding = "DB"
-database_name = "frontier-production-db"
-database_id = "6f92a95b-b7eb-459f-9d75-1ae9a037d1c7"
+# NOTE: D1 database binding (env.DB) is configured via the Cloudflare Dashboard
+# under Workers & Pages > fronterai-repo > Settings > Bindings > D1 Databases
+# Variable name: DB, Database: frontier-production-db
 
 # Environment Variables (Non-sensitive)
 [vars]
 NODE_ENV = "production"
+
 
