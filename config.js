@@ -22,12 +22,10 @@ if (fs.existsSync(envPath)) {
 
 export const PORT = process.env.PORT || 3030;
 export const BASE_URL = process.env.BASE_URL || `http://localhost:${PORT}`;
-export const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID || '';
-export const GITHUB_CLIENT_SECRET = process.env.GITHUB_CLIENT_SECRET || '';
+export const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID || '';
+export const GOOGLE_CLIENT_SECRET = process.env.GOOGLE_CLIENT_SECRET || '';
 export const VOTING_SECRET = process.env.VOTING_SECRET || '';
-export const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
 export const GROQ_API_KEY = process.env.GROQ_API_KEY || '';
-export const AI_PROVIDER = process.env.AI_PROVIDER || 'gemini'; // 'gemini' or 'groq'
 export const isProduction = process.env.NODE_ENV === 'production';
 export const ROOT_DIR = __dirname;
 export const PUBLIC_DIR = path.join(__dirname, 'public');

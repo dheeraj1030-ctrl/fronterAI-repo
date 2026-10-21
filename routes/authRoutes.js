@@ -2,37 +2,43 @@ import crypto from 'node:crypto';
 import { db, logAudit } from '../db.js';
 import { getSessionUser, createSession, destroySession } from '../middleware/session.js';
 import { parseCookies, parseBody, sendJson } from '../middleware/httpHelpers.js';
-import { BASE_URL, GITHUB_CLIENT_ID, GITHUB_CLIENT_SECRET, isProduction } from '../config.js';
+import { BASE_URL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, isProduction } from '../config.js';
 
 export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
   const cookies = parseCookies(req);
 
   if (pathname === '/api/auth/current' && method === 'GET') {
     const currentUser = getSessionUser(req);
-    return sendJson(res, 200, { user: currentUser, oauthConfigured: !!(GITHUB_CLIENT_ID && GITHUB_CLIENT_SECRET) });
+    return sendJson(res, 200, { user: currentUser, oauthConfigured: !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) });
   }
 
   // -------------------------------------------------------------
-  // REAL GITHUB OAUTH 2.0 FLOW
+  // GOOGLE OAUTH 2.0 FLOW
   // -------------------------------------------------------------
-  if (pathname === '/api/auth/github' && method === 'GET') {
-    if (!GITHUB_CLIENT_ID || !GITHUB_CLIENT_SECRET) {
+  if (pathname === '/api/auth/google' && method === 'GET') {
+    if (!GOOGLE_CLIENT_ID || !GOOGLE_CLIENT_SECRET) {
       res.writeHead(302, { Location: '/?error=oauth_not_configured' });
       return res.end();
     }
 
     const state = crypto.randomBytes(16).toString('hex');
-    const redirectUri = `${BASE_URL}/api/auth/github/callback`;
-    const githubAuthUrl = `https://github.com/login/oauth/authorize?client_id=${GITHUB_CLIENT_ID}&redirect_uri=${encodeURIComponent(redirectUri)}&scope=read:user&state=${state}`;
+    const redirectUri = `${BASE_URL}/api/auth/google/callback`;
+    const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
+      `client_id=${GOOGLE_CLIENT_ID}` +
+      `&redirect_uri=${encodeURIComponent(redirectUri)}` +
+      `&response_type=code` +
+      `&scope=${encodeURIComponent('openid email profile')}` +
+      `&access_type=offline` +
+      `&state=${state}`;
 
     res.writeHead(302, {
-      'Location': githubAuthUrl,
+      'Location': googleAuthUrl,
       'Set-Cookie': `oauth_state=${state}; HttpOnly; Path=/; SameSite=Lax; Max-Age=600`
     });
     return res.end();
   }
 
-  if (pathname === '/api/auth/github/callback' && method === 'GET') {
+  if (pathname === '/api/auth/google/callback' && method === 'GET') {
     const code = urlObj.searchParams.get('code');
     const state = urlObj.searchParams.get('state');
     const oauthError = urlObj.searchParams.get('error');
@@ -43,56 +49,61 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
     }
 
     if (!state || state !== cookies.oauth_state) {
-      logAudit('anonymous', 'OAUTH_CSRF_FAILED', 'auth_oauth', 'OAuth state parameter mismatch or missing state cookie.', 'DENIED');
+      logAudit('anonymous', 'OAUTH_CSRF_FAILED', 'auth_oauth', 'Google OAuth state parameter mismatch or missing state cookie.', 'DENIED');
       res.writeHead(302, { Location: '/?error=csrf_state_mismatch' });
       return res.end();
     }
 
     try {
-      const tokenRes = await fetch('https://github.com/login/oauth/access_token', {
+      // Exchange code for Google access token
+      const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          client_id: GITHUB_CLIENT_ID,
-          client_secret: GITHUB_CLIENT_SECRET,
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
           code,
-          redirect_uri: `${BASE_URL}/api/auth/github/callback`
-        })
+          client_id: GOOGLE_CLIENT_ID,
+          client_secret: GOOGLE_CLIENT_SECRET,
+          redirect_uri: `${BASE_URL}/api/auth/google/callback`,
+          grant_type: 'authorization_code'
+        }).toString()
       });
 
       const tokenData = await tokenRes.json();
       if (!tokenData.access_token) {
-        logAudit('anonymous', 'OAUTH_TOKEN_FAILED', 'auth_oauth', `Failed to obtain access token: ${tokenData.error_description || 'unknown error'}`, 'DENIED');
+        logAudit('anonymous', 'OAUTH_TOKEN_FAILED', 'auth_oauth', `Google token exchange failed: ${tokenData.error_description || 'unknown'}`, 'DENIED');
         res.writeHead(302, { Location: '/?error=token_exchange_failed' });
         return res.end();
       }
 
-      const userRes = await fetch('https://api.github.com/user', {
-        headers: {
-          'Authorization': `Bearer ${tokenData.access_token}`,
-          'User-Agent': 'FrontierAI-Workspace'
-        }
+      // Fetch Google user profile
+      const userRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { 'Authorization': `Bearer ${tokenData.access_token}` }
       });
+      const googleUser = await userRes.json();
+      const googleSub = googleUser.sub;   // Stable unique Google user ID
+      const googleEmail = googleUser.email;
 
-      const ghUser = await userRes.json();
-      const numericId = ghUser.id;
-      const ghLogin = ghUser.login;
-
-      const member = db.prepare('SELECT * FROM members WHERE github_numeric_id = ?').get(numericId);
+      // Check allowlist: match by google_sub (returning users) OR email (first login)
+      let member = db.prepare('SELECT * FROM members WHERE google_sub = ?').get(googleSub);
+      if (!member) {
+        member = db.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?) AND is_allowed = 1').get(googleEmail);
+        // On first login: bind google_sub to the allowlisted email record
+        if (member) {
+          db.prepare('UPDATE members SET google_sub = ? WHERE id = ?').run(googleSub, member.id);
+          member = db.prepare('SELECT * FROM members WHERE id = ?').get(member.id);
+        }
+      }
 
       if (!member || !member.is_allowed) {
         logAudit(
-          `gh_${ghLogin}`,
+          `google_${googleEmail || googleSub}`,
           'OAUTH_ALLOWLIST_DENIED',
           'auth_allowlist',
-          `GitHub user @${ghLogin} (Numeric ID: ${numericId}) authenticated via GitHub OAuth, but was REJECTED: Not in Frontier AI allowlist.`,
+          `Google account ${googleEmail} authenticated via Google OAuth but is NOT in the Frontier AI allowlist.`,
           'DENIED'
         );
         res.writeHead(302, {
-          Location: `/?error=unauthorized_allowlist&gh_user=${encodeURIComponent(ghLogin)}&gh_id=${numericId}`
+          Location: `/?error=unauthorized_allowlist&email=${encodeURIComponent(googleEmail || '')}`
         });
         return res.end();
       }
@@ -102,7 +113,7 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
         member.handle,
         'OAUTH_LOGIN_SUCCESS',
         'auth_session',
-        `Authenticated via real GitHub OAuth 2.0 as ${member.name} (@${ghLogin}, ID: ${numericId}). Access level: ${member.is_host ? 'AUTHORATOR' : 'PARTICIPANT'}.`,
+        `Authenticated via Google OAuth 2.0 as ${member.name} (${googleEmail}). Access level: ${member.is_host ? 'AUTHORATOR' : 'PARTICIPANT'}.`,
         'SUCCESS'
       );
 
@@ -113,31 +124,29 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
       return res.end();
 
     } catch (err) {
-      console.error('OAuth callback error:', err);
+      console.error('Google OAuth callback error:', err);
       res.writeHead(302, { Location: '/?error=oauth_internal_error' });
       return res.end();
     }
   }
 
-  // Dev Simulation Endpoint
-  if (pathname === '/api/auth/github/simulate' && method === 'GET') {
+  // Dev Simulation Endpoint (localhost only)
+  if (pathname === '/api/auth/google/simulate' && method === 'GET') {
     if (isProduction) {
       return sendJson(res, 404, { error: 'Not found' });
     }
-    const numericId = parseInt(urlObj.searchParams.get('github_numeric_id') || '10101', 10);
-    const member = db.prepare('SELECT * FROM members WHERE github_numeric_id = ?').get(numericId);
+    const email = urlObj.searchParams.get('email') || 'kart123.san@gmail.com';
+    const member = db.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?) AND is_allowed = 1').get(email);
 
     if (!member || !member.is_allowed) {
       logAudit(
-        `gh_${numericId}`,
+        `google_${email}`,
         'OAUTH_SIM_DENIED',
         'auth_allowlist',
-        `Simulated OAuth login rejected for GitHub Numeric ID ${numericId}. Not in allowlist.`,
+        `Simulated Google OAuth login rejected for email: ${email}. Not in allowlist.`,
         'DENIED'
       );
-      res.writeHead(302, {
-        Location: `/?error=unauthorized_allowlist&gh_user=unknown&gh_id=${numericId}`
-      });
+      res.writeHead(302, { Location: `/?error=unauthorized_allowlist&email=${encodeURIComponent(email)}` });
       return res.end();
     }
 
@@ -146,7 +155,7 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
       member.handle,
       'OAUTH_SIM_SUCCESS',
       'auth_session',
-      `Simulated GitHub OAuth 2.0 callback verified for ${member.name} (Numeric ID: ${numericId}).`,
+      `Simulated Google OAuth callback verified for ${member.name} (${email}).`,
       'SUCCESS'
     );
     res.writeHead(302, {
@@ -154,54 +163,6 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
       'Set-Cookie': `frontier_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
     });
     return res.end();
-  }
-
-  if (pathname === '/api/auth/login' && method === 'POST') {
-    if (isProduction) {
-      return sendJson(res, 404, { error: 'Not found' });
-    }
-    const body = await parseBody(req);
-    const { identifier } = body;
-
-    if (!identifier) {
-      return sendJson(res, 400, { error: 'Username or numeric GitHub ID is required.' });
-    }
-
-    let member = null;
-    const numId = parseInt(identifier, 10);
-    if (!isNaN(numId)) {
-      member = db.prepare('SELECT * FROM members WHERE github_numeric_id = ?').get(numId);
-    }
-    if (!member) {
-      member = db.prepare('SELECT * FROM members WHERE LOWER(handle) = LOWER(?)').get(identifier);
-    }
-
-    if (!member || !member.is_allowed) {
-      logAudit(
-        `auth_${identifier}`,
-        'LOGIN_REJECTED',
-        'auth_allowlist',
-        `Login attempt for "${identifier}" was rejected: not in Frontier AI allowlist.`,
-        'DENIED'
-      );
-      return sendJson(res, 403, {
-        error: 'Access Denied: Account is not in the Frontier AI membership allowlist.'
-      });
-    }
-
-    const sessionToken = createSession(member);
-    logAudit(
-      member.handle,
-      'LOGIN_SUCCESS',
-      'auth_session',
-      `Authenticated as ${member.name} (${member.role}). Access level: ${member.is_host ? 'AUTHORATOR' : 'PARTICIPANT'}.`,
-      'SUCCESS'
-    );
-    res.writeHead(200, {
-      'Content-Type': 'application/json',
-      'Set-Cookie': `frontier_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
-    });
-    return res.end(JSON.stringify({ user: member, message: 'Logged in successfully' }));
   }
 
   if (pathname === '/api/auth/logout' && method === 'POST') {
@@ -216,44 +177,6 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
       'Set-Cookie': 'frontier_session=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0'
     });
     return res.end(JSON.stringify({ message: 'Logged out successfully' }));
-  }
-
-  if (pathname === '/api/auth/login-as' && method === 'POST') {
-    if (isProduction) {
-      return sendJson(res, 404, { error: 'Not found' });
-    }
-    const body = await parseBody(req);
-    const { github_numeric_id } = body;
-
-    const member = db.prepare('SELECT * FROM members WHERE github_numeric_id = ?').get(github_numeric_id);
-
-    if (!member || !member.is_allowed) {
-      logAudit(
-        `gh_${github_numeric_id || 'unknown'}`,
-        'LOGIN_ATTEMPT',
-        'auth_allowlist',
-        `Unauthorized login attempt from GitHub ID ${github_numeric_id}. Rejected by allowlist policy.`,
-        'DENIED'
-      );
-      return sendJson(res, 403, {
-        error: 'Access Denied: Account is not in the Frontier AI membership allowlist.',
-        github_numeric_id
-      });
-    }
-
-    const sessionToken = createSession(member);
-    logAudit(
-      member.handle,
-      'LOGIN_SUCCESS',
-      'auth_session',
-      `Authenticated as ${member.name} (${member.role}). Access level: ${member.is_host ? 'AUTHORATOR' : 'PARTICIPANT'}.`,
-      'SUCCESS'
-    );
-    res.writeHead(200, {
-      'Content-Type': 'application/json',
-      'Set-Cookie': `frontier_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
-    });
-    return res.end(JSON.stringify({ user: member, message: 'Logged in successfully' }));
   }
 
   return false;
