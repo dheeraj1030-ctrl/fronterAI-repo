@@ -1,14 +1,14 @@
 import { DatabaseSync } from 'node:sqlite';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const DB_PATH = path.join(__dirname, 'frontier.db');
+import { DB_PATH } from './config.js';
 
 export const db = new DatabaseSync(DB_PATH);
 
 export function initDatabase() {
+  // Performance & Concurrency Pragmas
+  db.exec('PRAGMA journal_mode = WAL;');
+  db.exec('PRAGMA busy_timeout = 5000;');
+  db.exec('PRAGMA foreign_keys = ON;');
+
   db.exec(`
     CREATE TABLE IF NOT EXISTS members (
       id INTEGER PRIMARY KEY,
@@ -108,6 +108,16 @@ export function initDatabase() {
       FOREIGN KEY (option_id) REFERENCES voting_options (id)
     );
 
+    -- Persistent User Authentication Sessions
+    CREATE TABLE IF NOT EXISTS sessions (
+      token TEXT PRIMARY KEY,
+      member_id INTEGER NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      FOREIGN KEY (member_id) REFERENCES members (id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions (token);
+
     -- 2-Man Rule Access-Request Tickets
     CREATE TABLE IF NOT EXISTS access_tickets (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +144,49 @@ export function initDatabase() {
       target TEXT NOT NULL,
       details TEXT,
       status TEXT NOT NULL
+    );
+
+    -- Peer-to-Peer Tasklets (Member-to-Member informal micro-tasks)
+    CREATE TABLE IF NOT EXISTS tasklets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      sender_id INTEGER NOT NULL,
+      receiver_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING', -- 'PENDING', 'ACCEPTED', 'DONE'
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (sender_id) REFERENCES members (id),
+      FOREIGN KEY (receiver_id) REFERENCES members (id)
+    );
+
+    -- AI Conversation Threads (Short-term chat session memory)
+    CREATE TABLE IF NOT EXISTS ai_threads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      member_id INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (member_id) REFERENCES members (id) ON DELETE CASCADE
+    );
+
+    -- AI Conversation Turn Messages
+    CREATE TABLE IF NOT EXISTS ai_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      thread_id INTEGER NOT NULL,
+      sender_role TEXT NOT NULL, -- 'user' or 'model'
+      content TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (thread_id) REFERENCES ai_threads (id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_ai_messages_thread ON ai_messages (thread_id);
+
+    -- Long-term Member Profile & Goal Memory
+    CREATE TABLE IF NOT EXISTS member_memories (
+      member_id INTEGER PRIMARY KEY,
+      memory_data TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (member_id) REFERENCES members (id) ON DELETE CASCADE
     );
   `);
 
@@ -179,6 +232,11 @@ export function seedMeetingSlots() {
 export function seedData() {
   // Clear old seed if re-running (delete child tables before parent tables)
   db.exec(`
+    DELETE FROM ai_messages;
+    DELETE FROM ai_threads;
+    DELETE FROM member_memories;
+    DELETE FROM tasklets;
+    DELETE FROM sessions;
     DELETE FROM ballots;
     DELETE FROM used_tokens;
     DELETE FROM voting_eligibility;
@@ -258,6 +316,16 @@ export function seedData() {
     insertCal.run(...ev);
   }
 
+  // Initialize initial memory for Host
+  db.prepare(`
+    INSERT OR REPLACE INTO member_memories (member_id, memory_data, updated_at)
+    VALUES (?, ?, datetime('now'))
+  `).run(1, JSON.stringify({
+    skills: ['Architecture', 'Node.js', 'SQLite', 'Security Governance'],
+    focus_area: 'Core Workspace Platform & AI Integration',
+    notes: 'Team Lead and Authorator'
+  }));
+
   // Log system initialization in audit
   db.prepare(`
     INSERT INTO audit_events (timestamp, actor_handle, action, target, details, status)
@@ -267,7 +335,7 @@ export function seedData() {
     'potatobun321',
     'INIT_PLATFORM',
     'governance',
-    'Frontier AI Platform initialized with clean slate. Kartikay designated as Team Host & Lead.',
+    'Frontier AI Platform initialized with clean slate and AI memory. Kartikay designated as Team Host & Lead.',
     'SUCCESS'
   );
 }

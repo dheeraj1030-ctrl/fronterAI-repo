@@ -48,6 +48,11 @@ async function runTests() {
     const host = mData.members.find(m => m.is_host === 1);
     console.log(`[PASS] 1. Verified Members: ${mData.members.length} members loaded. Authorized Host: ${host.name} (@${host.handle})`);
 
+    // 1b. Verify sanitized public members projection (no github_numeric_id leaked!)
+    const hasLeakedNumericId = mData.members.some(m => m.github_numeric_id !== undefined);
+    if (hasLeakedNumericId) throw new Error('Security Failure: /api/members leaked github_numeric_id to unauthenticated caller!');
+    console.log(`[PASS] 1b. Public Member Sanitization: Zero numeric GitHub IDs leaked to anonymous visitors.`);
+
     // 2. Allowlist rejection
     const badLogin = await testFetch(base + '/api/auth/login-as', {
       method: 'POST',
@@ -211,9 +216,79 @@ async function runTests() {
 
     const snapRes = await testFetch(base + '/api/disaster-recovery/export', { method: 'POST' });
     const snapData = await snapRes.json();
-    console.log(`[PASS] 12b. Authorator Git Snapshot: Generated clean JSON backup at ${snapData.filename} (${snapData.totalTables} tables)\n`);
+    console.log(`[PASS] 12b. Authorator Git Snapshot: Generated clean JSON backup at ${snapData.filename} (${snapData.totalTables} tables)`);
 
-    console.log('🎉 ALL 13 ENHANCED ARCHITECTURE CHECKS PASSED PERFECTLY!');
+    // 9. Audit Log Security & Access Control
+    // Host can view audit log
+    const hostAuditRes = await testFetch(base + '/api/audit');
+    if (hostAuditRes.status !== 200) throw new Error(`Host audit check failed with HTTP ${hostAuditRes.status}`);
+    const hostAuditData = await hostAuditRes.json();
+    console.log(`[PASS] 13a. Host Audit Trail Access: Host retrieved ${hostAuditData.events.length} audit events.`);
+
+    // Switch to Participant Bob (is_host = 0) and verify audit log is blocked
+    await testFetch(base + '/api/auth/login-as', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ github_numeric_id: 10102 })
+    });
+    const participantAuditRes = await testFetch(base + '/api/audit');
+    if (participantAuditRes.status !== 403) throw new Error(`Participant audit should be 403, got ${participantAuditRes.status}`);
+    console.log(`[PASS] 13b. Audit Gating: Participant blocked from viewing audit log with HTTP 403 Forbidden.`);
+
+    // Logout and verify unauthenticated audit request is blocked (401)
+    await testFetch(base + '/api/auth/logout', { method: 'POST' });
+    const unauthAuditRes = await testFetch(base + '/api/audit');
+    if (unauthAuditRes.status !== 401) throw new Error(`Unauthenticated audit should be 401, got ${unauthAuditRes.status}`);
+    console.log(`[PASS] 13c. Audit Authentication: Anonymous caller blocked from audit trail with HTTP 401 Unauthorized.`);
+
+    // 10. Persistent SQLite Session Storage Verification
+    // Login as Host (id: 1) and verify the session token is recorded in the SQLite sessions table
+    await testFetch(base + '/api/auth/login-as', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ github_numeric_id: 194890859 })
+    });
+    const currentToken = sessionCookie.replace('frontier_session=', '');
+    const dbSession = db.prepare('SELECT * FROM sessions WHERE token = ?').get(currentToken);
+    if (!dbSession || dbSession.member_id !== 1) {
+      throw new Error('Database Session Failure: Active session token not persisted in SQLite sessions table!');
+    }
+    console.log(`[PASS] 14. Persistent SQLite Sessions: Validated active session token persisted in SQLite database.`);
+
+    // 11. Frontier Oracle AI Assistant & Memory Verification
+    // 15a. Query Oracle AI Assistant
+    const aiRes = await testFetch(base + '/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'What are the current tasks in progress?' })
+    });
+    if (aiRes.status !== 200) throw new Error(`AI Chat query failed with HTTP ${aiRes.status}`);
+    const aiData = await aiRes.json();
+    if (!aiData.threadId || !aiData.reply) throw new Error('AI Chat response missing threadId or reply');
+    console.log(`[PASS] 15a. Frontier Oracle AI Query: Received grounded workspace response for thread #${aiData.threadId}`);
+
+    // 15b. AI Conversation Thread & Memory Persistence
+    const threadsRes = await testFetch(base + '/api/ai/threads');
+    const threadsData = await threadsRes.json();
+    const activeThread = threadsData.threads.find(t => t.id === aiData.threadId);
+    if (!activeThread) throw new Error('AI thread was not persisted in SQLite ai_threads table!');
+
+    const msgRes = await testFetch(base + `/api/ai/threads/${aiData.threadId}/messages`);
+    const msgData = await msgRes.json();
+    if (!msgData.messages || msgData.messages.length < 2) throw new Error('AI conversation turns were not recorded in ai_messages table!');
+    console.log(`[PASS] 15b. AI Memory Engine: Thread #${aiData.threadId} persisted with ${msgData.messages.length} conversational turns in SQLite.`);
+
+    // 15c. Unauthenticated AI query blocked (401)
+    await testFetch(base + '/api/auth/logout', { method: 'POST' });
+    const unauthAiRes = await testFetch(base + '/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Give me secret data' })
+    });
+    if (unauthAiRes.status !== 401) throw new Error(`Unauthenticated AI query should be 401, got ${unauthAiRes.status}`);
+    console.log(`[PASS] 15c. AI Security Isolation: Unauthenticated callers blocked from AI Oracle with HTTP 401 Unauthorized.\n`);
+
+    console.log('🎉 ALL 20 ARCHITECTURE, SECURITY & AI MEMORY CHECKS PASSED PERFECTLY!');
     process.exit(0);
 
   } catch (err) {
@@ -223,3 +298,4 @@ async function runTests() {
 }
 
 runTests();
+
