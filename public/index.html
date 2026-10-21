@@ -174,6 +174,11 @@
             <span class="nav-label" id="nav-label-peers-settings">Peers</span>
             <span class="nav-badge" id="badge-tasklets-count" style="display: none;">0</span>
           </button>
+          <button class="nav-item" data-view="view-oracle" id="nav-item-oracle">
+            <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83"/></svg>
+            <span class="nav-label">Oracle AI</span>
+            <span class="nav-badge" style="background: rgba(168, 199, 250, 0.15); color: #a8c7fa;">AI</span>
+          </button>
         </div>
 
         <div class="sidebar-divider" id="sidebar-admin-divider" style="display: none;"></div>
@@ -627,6 +632,67 @@
               <div class="terminal-box" id="backup-terminal-output" style="padding: 10px 12px; font-size: 12px;">
                 <code>Ready to trigger backup snapshot... Click above to execute.</code>
               </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ======================================================== -->
+        <!-- MODULE 5: ORACLE AI ASSISTANT -->
+        <!-- ======================================================== -->
+        <section id="view-oracle" class="workspace-view">
+          <div class="view-header">
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 20px; color: var(--google-blue);">✦</span>
+                <h2 class="view-title">Frontier Oracle</h2>
+                <span class="cost-pill" style="border-color: var(--google-blue); color: var(--google-blue);">Live AI Assistant</span>
+              </div>
+              <p class="view-subtitle">Intelligent project oracle with real-time workspace memory and task awareness</p>
+            </div>
+            <div class="header-action-group">
+              <button class="btn btn-outlined" id="btn-oracle-new-thread">+ New Chat</button>
+            </div>
+          </div>
+
+          <div class="oracle-workspace-container">
+            <!-- Sidebar: Recent Threads -->
+            <div class="oracle-threads-sidebar">
+              <div class="oracle-threads-header">
+                <span>Conversations</span>
+              </div>
+              <div class="oracle-threads-list" id="oracle-threads-list">
+                <!-- Dynamically populated -->
+              </div>
+            </div>
+
+            <!-- Main Chat Workspace -->
+            <div class="oracle-chat-main">
+              <div class="oracle-messages-box" id="oracle-messages-box">
+                <div class="oracle-bubble oracle-bubble-model">
+                  <div class="oracle-bubble-avatar">✦</div>
+                  <div class="oracle-bubble-content">
+                    <p>👋 Hello! I am <strong>Frontier Oracle</strong>, your internal engineering AI assistant.</p>
+                    <p>I have real-time memory of the team's sprint deliverables, calendar syncs, peer tasklets, and track allocations. How can I help you today?</p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Quick Suggestion Chips -->
+              <div class="oracle-quick-chips" id="oracle-quick-chips">
+                <button class="oracle-chip" data-prompt="What tasks are currently in progress?">📋 Active Tasks</button>
+                <button class="oracle-chip" data-prompt="When is our next team sync and call?">📅 Next Meeting</button>
+                <button class="oracle-chip" data-prompt="Who is currently on the team and what are their tracks?">👥 Team Directory</button>
+                <button class="oracle-chip" data-prompt="What peer tasklets have been exchanged recently?">⚡ Peer Tasklets</button>
+              </div>
+
+              <!-- Prompt Input Bar -->
+              <form id="form-oracle-chat" class="oracle-input-form">
+                <input type="text" id="oracle-input-text" class="oracle-input-field" placeholder="Ask Oracle about sprint deliverables, meetings, teammates, or architecture..." autocomplete="off">
+                <button type="submit" class="btn btn-filled oracle-send-btn" id="btn-oracle-send">
+                  <span>Send</span>
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"></line><polygon points="22 2 15 22 11 13 2 9 22 2"></polygon></svg>
+                </button>
+              </form>
             </div>
           </div>
         </section>

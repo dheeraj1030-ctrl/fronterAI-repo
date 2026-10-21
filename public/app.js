@@ -20,7 +20,9 @@ const state = {
   taskletTab: 'received',
   dockedCallActive: false,
   dockedCallMuted: false,
-  dockedCallCamOff: false
+  dockedCallCamOff: false,
+  currentOracleThreadId: null,
+  oracleThreads: []
 };
 
 export function showToast(message, isError = false) {
@@ -273,6 +275,8 @@ function switchView(viewId) {
     loadTasklets();
   } else if (viewId === 'view-settings') {
     loadMembers().then(renderTeamRoster);
+  } else if (viewId === 'view-oracle') {
+    loadOracleThreads();
   }
 }
 
@@ -2513,6 +2517,209 @@ function setupEventListeners() {
     dl.setAttribute("download", `frontier_activity_${new Date().toISOString().slice(0,10)}.csv`);
     dl.click();
     showToast('Activity log exported as CSV');
+  });
+
+  setupOracleListeners();
+}
+
+// =============================================================
+// MODULE 5: FRONTIER ORACLE AI ASSISTANT CLIENT LOGIC
+// =============================================================
+
+async function loadOracleThreads() {
+  try {
+    const res = await fetch('/api/ai/threads');
+    if (!res.ok) return;
+    const data = await res.json();
+    state.oracleThreads = data.threads || [];
+    renderOracleThreadsList();
+  } catch (err) {
+    console.error('Failed to load Oracle threads:', err);
+  }
+}
+
+function renderOracleThreadsList() {
+  const container = document.getElementById('oracle-threads-list');
+  if (!container) return;
+
+  if (state.oracleThreads.length === 0) {
+    container.innerHTML = '<div style="color: var(--text-muted); font-size: 12px; padding: 12px; text-align: center;">No previous conversations.</div>';
+    return;
+  }
+
+  container.innerHTML = state.oracleThreads.map(t => `
+    <div class="oracle-thread-item ${t.id === state.currentOracleThreadId ? 'active' : ''}" data-thread-id="${t.id}" title="${escapeHtml(t.title)}">
+      ${escapeHtml(t.title)}
+    </div>
+  `).join('');
+
+  container.querySelectorAll('.oracle-thread-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const threadId = parseInt(el.dataset.threadId, 10);
+      loadOracleThreadMessages(threadId);
+    });
+  });
+}
+
+async function loadOracleThreadMessages(threadId) {
+  state.currentOracleThreadId = threadId;
+  renderOracleThreadsList();
+
+  const msgBox = document.getElementById('oracle-messages-box');
+  if (!msgBox) return;
+
+  try {
+    const res = await fetch(`/api/ai/threads/${threadId}/messages`);
+    if (!res.ok) return;
+    const data = await res.json();
+
+    msgBox.innerHTML = '';
+    for (const msg of data.messages) {
+      appendOracleBubble(msg.sender_role, msg.content);
+    }
+    msgBox.scrollTop = msgBox.scrollHeight;
+  } catch (err) {
+    console.error('Failed to load messages for thread:', err);
+  }
+}
+
+function appendOracleBubble(senderRole, content) {
+  const msgBox = document.getElementById('oracle-messages-box');
+  if (!msgBox) return;
+
+  const isModel = senderRole === 'model';
+  const avatar = isModel ? '✦' : (state.currentUser ? getInitials(state.currentUser.name) : 'ME');
+  const roleClass = isModel ? 'oracle-bubble-model' : 'oracle-bubble-user';
+
+  const bubble = document.createElement('div');
+  bubble.className = `oracle-bubble ${roleClass}`;
+  bubble.innerHTML = `
+    <div class="oracle-bubble-avatar">${avatar}</div>
+    <div class="oracle-bubble-content">${formatOracleText(content)}</div>
+  `;
+
+  msgBox.appendChild(bubble);
+  msgBox.scrollTop = msgBox.scrollHeight;
+  return bubble;
+}
+
+function formatOracleText(text) {
+  if (!text) return '';
+  // Basic markdown formatting
+  let html = escapeHtml(text);
+
+  // Bold
+  html = html.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  // Inline code
+  html = html.replace(/`([^`]+)`/g, '<code style="background: rgba(255,255,255,0.08); padding: 2px 5px; border-radius: 4px; font-family: var(--font-mono); font-size: 12px;">$1</code>');
+  // Headings
+  html = html.replace(/### (.*?)\n/g, '<h3 style="font-size: 14px; margin-top: 10px; margin-bottom: 6px; color: var(--google-blue);">$1</h3>');
+  // Bullet lists
+  html = html.replace(/(?:^|\n)[•\-] (.*?)(?=\n|$)/g, '<li style="margin-left: 18px; margin-bottom: 4px;">$1</li>');
+  // Paragraph line breaks
+  html = html.replace(/\n\n/g, '<br><br>');
+
+  return html;
+}
+
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+async function sendOracleMessage(userText) {
+  if (!userText || !userText.trim()) return;
+
+  // Render user bubble immediately
+  appendOracleBubble('user', userText.trim());
+
+  // Render temporary loading indicator
+  const msgBox = document.getElementById('oracle-messages-box');
+  const loadingBubble = document.createElement('div');
+  loadingBubble.className = 'oracle-bubble oracle-bubble-model';
+  loadingBubble.id = 'oracle-thinking-bubble';
+  loadingBubble.innerHTML = `
+    <div class="oracle-bubble-avatar">✦</div>
+    <div class="oracle-bubble-content" style="color: var(--google-blue); font-style: italic;">
+      Consulting workspace memory...
+    </div>
+  `;
+  msgBox.appendChild(loadingBubble);
+  msgBox.scrollTop = msgBox.scrollHeight;
+
+  try {
+    const res = await fetch('/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        message: userText.trim(),
+        threadId: state.currentOracleThreadId
+      })
+    });
+
+    loadingBubble.remove();
+
+    if (!res.ok) {
+      const errData = await res.json().catch(() => ({}));
+      appendOracleBubble('model', `⚠️ Error: ${errData.error || 'Failed to retrieve answer from Oracle.'}`);
+      return;
+    }
+
+    const data = await res.json();
+    state.currentOracleThreadId = data.threadId;
+
+    // Render response
+    appendOracleBubble('model', data.reply);
+
+    // Refresh threads list
+    await loadOracleThreads();
+  } catch (err) {
+    loadingBubble.remove();
+    appendOracleBubble('model', '⚠️ Network connection error when reaching Oracle.');
+  }
+}
+
+function setupOracleListeners() {
+  const form = document.getElementById('form-oracle-chat');
+  const input = document.getElementById('oracle-input-text');
+
+  form?.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const text = input?.value || '';
+    if (!text.trim()) return;
+    input.value = '';
+    sendOracleMessage(text);
+  });
+
+  // Suggestion chips
+  document.querySelectorAll('#oracle-quick-chips .oracle-chip').forEach(chip => {
+    chip.addEventListener('click', () => {
+      const prompt = chip.dataset.prompt;
+      if (prompt) sendOracleMessage(prompt);
+    });
+  });
+
+  // New Chat button
+  document.getElementById('btn-oracle-new-thread')?.addEventListener('click', () => {
+    state.currentOracleThreadId = null;
+    renderOracleThreadsList();
+    const msgBox = document.getElementById('oracle-messages-box');
+    if (msgBox) {
+      msgBox.innerHTML = `
+        <div class="oracle-bubble oracle-bubble-model">
+          <div class="oracle-bubble-avatar">✦</div>
+          <div class="oracle-bubble-content">
+            <p>👋 Started a new conversation!</p>
+            <p>Ask anything about current sprint tasks, deadlines, meeting slots, or team assignments.</p>
+          </div>
+        </div>
+      `;
+    }
   });
 }
 

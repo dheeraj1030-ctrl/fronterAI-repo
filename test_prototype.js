@@ -253,9 +253,42 @@ async function runTests() {
     if (!dbSession || dbSession.member_id !== 1) {
       throw new Error('Database Session Failure: Active session token not persisted in SQLite sessions table!');
     }
-    console.log(`[PASS] 14. Persistent SQLite Sessions: Validated active session token persisted in SQLite database.\n`);
+    console.log(`[PASS] 14. Persistent SQLite Sessions: Validated active session token persisted in SQLite database.`);
 
-    console.log('🎉 ALL 17 ENHANCED ARCHITECTURE & SECURITY CHECKS PASSED PERFECTLY!');
+    // 11. Frontier Oracle AI Assistant & Memory Verification
+    // 15a. Query Oracle AI Assistant
+    const aiRes = await testFetch(base + '/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'What are the current tasks in progress?' })
+    });
+    if (aiRes.status !== 200) throw new Error(`AI Chat query failed with HTTP ${aiRes.status}`);
+    const aiData = await aiRes.json();
+    if (!aiData.threadId || !aiData.reply) throw new Error('AI Chat response missing threadId or reply');
+    console.log(`[PASS] 15a. Frontier Oracle AI Query: Received grounded workspace response for thread #${aiData.threadId}`);
+
+    // 15b. AI Conversation Thread & Memory Persistence
+    const threadsRes = await testFetch(base + '/api/ai/threads');
+    const threadsData = await threadsRes.json();
+    const activeThread = threadsData.threads.find(t => t.id === aiData.threadId);
+    if (!activeThread) throw new Error('AI thread was not persisted in SQLite ai_threads table!');
+
+    const msgRes = await testFetch(base + `/api/ai/threads/${aiData.threadId}/messages`);
+    const msgData = await msgRes.json();
+    if (!msgData.messages || msgData.messages.length < 2) throw new Error('AI conversation turns were not recorded in ai_messages table!');
+    console.log(`[PASS] 15b. AI Memory Engine: Thread #${aiData.threadId} persisted with ${msgData.messages.length} conversational turns in SQLite.`);
+
+    // 15c. Unauthenticated AI query blocked (401)
+    await testFetch(base + '/api/auth/logout', { method: 'POST' });
+    const unauthAiRes = await testFetch(base + '/api/ai/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: 'Give me secret data' })
+    });
+    if (unauthAiRes.status !== 401) throw new Error(`Unauthenticated AI query should be 401, got ${unauthAiRes.status}`);
+    console.log(`[PASS] 15c. AI Security Isolation: Unauthenticated callers blocked from AI Oracle with HTTP 401 Unauthorized.\n`);
+
+    console.log('🎉 ALL 20 ARCHITECTURE, SECURITY & AI MEMORY CHECKS PASSED PERFECTLY!');
     process.exit(0);
 
   } catch (err) {
@@ -265,3 +298,4 @@ async function runTests() {
 }
 
 runTests();
+
