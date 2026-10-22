@@ -20,3 +20,4 @@ database_id = "caceef73-0711-4397-96b3-77e43c91f029"
 # Environment Variables (Non-sensitive)
 [vars]
 NODE_ENV = "production"
+GOOGLE_CLIENT_ID = "33531224866-tci0079quk7mfgh7plhtgnpj6lfa96ou.apps.googleusercontent.com"

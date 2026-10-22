@@ -138,7 +138,7 @@ export async function onRequest(context) {
     // 2. GOOGLE OAUTH 2.0 FLOW
     // --------------------------------------------------------------------------
     if (pathname === '/api/auth/google' && method === 'GET') {
-      const clientId = env.GOOGLE_CLIENT_ID;
+      const clientId = env.GOOGLE_CLIENT_ID || '33531224866-tci0079quk7mfgh7plhtgnpj6lfa96ou.apps.googleusercontent.com';
       if (!clientId) return jsonResponse({ error: 'GOOGLE_CLIENT_ID not configured on Cloudflare' }, 500);
 
       const state = crypto.randomUUID();
@@ -171,13 +171,15 @@ export async function onRequest(context) {
         return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?error=csrf_state_mismatch` } });
       }
 
+      const clientId = env.GOOGLE_CLIENT_ID || '33531224866-tci0079quk7mfgh7plhtgnpj6lfa96ou.apps.googleusercontent.com';
+
       // Exchange code for token
       const tokenRes = await fetch('https://oauth2.googleapis.com/token', {
         method: 'POST',
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         body: new URLSearchParams({
           code,
-          client_id: env.GOOGLE_CLIENT_ID,
+          client_id: clientId,
           client_secret: env.GOOGLE_CLIENT_SECRET,
           redirect_uri: `${url.origin}/api/auth/google/callback`,
           grant_type: 'authorization_code'
