@@ -1154,15 +1154,18 @@ async function updateTaskWithOccCheck(taskId, payload, originalTask) {
 // -------------------------------------------------------------
 async function loadVotingSession() {
   try {
-    const sessionId = state.currentVotingSessionId || 1;
-    const res = await fetch(`/api/voting/current?session_id=${sessionId}`);
+    const sessionId = state.currentVotingSessionId || '';
+    const url = sessionId ? `/api/voting/current?session_id=${sessionId}` : '/api/voting/current';
+    const res = await fetch(url);
     const data = await res.json();
     state.votingSession = data;
 
-    // Restore unlinked ballot token from sessionStorage if present
-    const savedToken = sessionStorage.getItem('ballot_token_' + sessionId);
-    if (savedToken) {
-      state.unlinkedBallotToken = savedToken;
+    if (data.session && data.session.id) {
+      state.currentVotingSessionId = data.session.id;
+      const savedToken = sessionStorage.getItem('ballot_token_' + data.session.id);
+      if (savedToken) {
+        state.unlinkedBallotToken = savedToken;
+      }
     }
 
     renderVotingSession();
@@ -1173,16 +1176,131 @@ async function loadVotingSession() {
 
 function renderVotingSession() {
   const s = state.votingSession;
-  if (!s || !s.session) return;
+  const isHost = !!(state.currentUser && state.currentUser.is_host);
+
+  const idleContainer = document.getElementById('voting-idle-container');
+  const activeContainer = document.getElementById('voting-active-container');
+  const closedContainer = document.getElementById('voting-closed-container');
+
+  const openLaunchBtn = document.getElementById('btn-open-launch-voting');
+  const idleLaunchBtn = document.getElementById('btn-idle-launch-voting');
+  const closeVoteBtn = document.getElementById('btn-host-close-voting');
+  const reopenVoteBtn = document.getElementById('btn-host-reopen-voting');
+  const closedNewRoundBtn = document.getElementById('btn-closed-new-round');
+  const closedReopenBtn = document.getElementById('btn-closed-reopen-round');
+  const statusPill = document.getElementById('voting-status-pill');
+  const subtitleEl = document.getElementById('voting-view-subtitle');
+
+  // Case 1: Idle state (No active session AND no closed session)
+  if (!s || (!s.active && !s.hasClosedSession)) {
+    if (idleContainer) idleContainer.classList.remove('hidden');
+    if (activeContainer) activeContainer.classList.add('hidden');
+    if (closedContainer) closedContainer.classList.add('hidden');
+
+    if (statusPill) {
+      statusPill.innerHTML = '<span class="pulse-dot" style="background:#9aa0a6; width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px;"></span>No Active Round';
+      statusPill.className = 'status-pill pill-grey';
+    }
+    if (subtitleEl) {
+      subtitleEl.textContent = 'Anonymous cryptographic evaluation. No active voting round is currently open.';
+    }
+
+    if (openLaunchBtn) {
+      if (isHost) openLaunchBtn.classList.remove('hidden');
+      else openLaunchBtn.classList.add('hidden');
+    }
+    if (idleLaunchBtn) {
+      if (isHost) idleLaunchBtn.classList.remove('hidden');
+      else idleLaunchBtn.classList.add('hidden');
+    }
+    if (closeVoteBtn) closeVoteBtn.classList.add('hidden');
+    if (reopenVoteBtn) reopenVoteBtn.classList.add('hidden');
+    return;
+  }
+
+  // Case 2: Closed state (Has a closed session and no active session)
+  if (!s.active && s.hasClosedSession && s.session) {
+    if (idleContainer) idleContainer.classList.add('hidden');
+    if (activeContainer) activeContainer.classList.add('hidden');
+    if (closedContainer) closedContainer.classList.remove('hidden');
+
+    if (statusPill) {
+      statusPill.innerHTML = '<span class="pulse-dot" style="background:#fbbc04; width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px;"></span>Session Closed';
+      statusPill.className = 'status-pill pill-amber';
+    }
+
+    const closedTitleEl = document.getElementById('closed-round-title');
+    const closedDescEl = document.getElementById('closed-round-desc');
+    if (closedTitleEl) closedTitleEl.textContent = s.session.title || 'Sprint Standings & Aggregate Results';
+    if (closedDescEl) {
+      closedDescEl.textContent = s.session.description
+        ? `${s.session.description} — submissions concluded.`
+        : 'Submissions have concluded for this round. Final cryptographic ratings and rankings are listed below.';
+    }
+
+    renderTallyMeters(s.tally || [], s.candidates || s.options || [], 'closed-tally-bars-display');
+
+    if (openLaunchBtn) {
+      if (isHost) openLaunchBtn.classList.remove('hidden');
+      else openLaunchBtn.classList.add('hidden');
+    }
+    if (closeVoteBtn) closeVoteBtn.classList.add('hidden');
+    if (reopenVoteBtn) {
+      if (isHost) reopenVoteBtn.classList.remove('hidden');
+      else reopenVoteBtn.classList.add('hidden');
+    }
+    if (closedNewRoundBtn) {
+      if (isHost) closedNewRoundBtn.classList.remove('hidden');
+      else closedNewRoundBtn.classList.add('hidden');
+    }
+    if (closedReopenBtn) {
+      if (isHost) closedReopenBtn.classList.remove('hidden');
+      else closedReopenBtn.classList.add('hidden');
+    }
+    return;
+  }
+
+  // Case 3: Active state
+  if (idleContainer) idleContainer.classList.add('hidden');
+  if (closedContainer) closedContainer.classList.add('hidden');
+  if (activeContainer) activeContainer.classList.remove('hidden');
+
+  if (statusPill) {
+    statusPill.innerHTML = '<span class="pulse-dot" style="background:#34a853; width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px;"></span>Active Round';
+    statusPill.className = 'status-pill pill-green';
+  }
 
   const headlineEl = document.getElementById('voting-session-headline');
-  if (headlineEl) headlineEl.textContent = s.session.title || 'Sprint 1 Evaluation Round';
+  if (headlineEl) headlineEl.textContent = s.session.title || 'Active Evaluation Round';
+
+  const metricChipEl = document.getElementById('voting-active-metric-chip');
+  if (metricChipEl) metricChipEl.textContent = s.session.description || 'Sprint Contribution & Team Collaboration';
+
+  if (subtitleEl) {
+    subtitleEl.textContent = s.session.description
+      ? `${s.session.description} — anonymous 1–5 star ratings.`
+      : 'Anonymous sprint contribution ratings (1–5 Stars). Cryptographically decoupled via HMAC blind tokens with zero identity linkage.';
+  }
+
+  const isQualityType = s.session.session_type === 'PROJECT_QUALITY';
+  const labelCandidateStep = document.getElementById('label-select-candidate-step');
+  const hintCandidateStep = document.getElementById('hint-select-candidate-step');
+  const labelRatingStep = document.getElementById('label-rating-step');
+
+  if (labelCandidateStep) {
+    labelCandidateStep.textContent = isQualityType ? '1. Select Project Track to Evaluate' : '1. Select Teammate to Evaluate';
+  }
+  if (hintCandidateStep) {
+    hintCandidateStep.textContent = isQualityType ? 'Rate milestone deliverable quality, architecture integrity, and stability' : 'Pick any teammate to submit an anonymous 1–5 star rating';
+  }
+  if (labelRatingStep) {
+    labelRatingStep.textContent = isQualityType ? '2. Rate Track Quality & Milestone Stability' : '2. Rate Sprint Contribution & Collaboration';
+  }
 
   const ballots = s.totalBallots || 0;
   const eligible = s.totalEligible || s.candidates?.length || 8;
   const pct = Math.min(100, Math.round((ballots / eligible) * 100));
 
-  // Circular Chart & Stats
   const ballotsCountEl = document.getElementById('stats-ballots-count');
   const ballotsTotalEl = document.getElementById('stats-ballots-total');
   const ballotsBarEl = document.getElementById('stats-ballots-bar');
@@ -1195,65 +1313,29 @@ function renderVotingSession() {
   if (ballotsBarEl) ballotsBarEl.style.width = `${pct}%`;
   if (circleFillEl) circleFillEl.setAttribute('stroke-dasharray', `${pct}, 100`);
   if (circlePctEl) circlePctEl.textContent = `${pct}%`;
+  if (partPillEl) partPillEl.textContent = ballots >= eligible ? 'All Evaluations Submitted' : 'Active Round in Progress';
 
-  const memberName = state.currentUser ? state.currentUser.name : 'Unknown';
-  const memberLabel = document.getElementById('stepper-member-label');
-  if (memberLabel) memberLabel.textContent = memberName;
-
-  const step1 = document.getElementById('step-node-1');
-  const step2 = document.getElementById('step-node-2');
-  const step3 = document.getElementById('step-node-3');
-  const step4 = document.getElementById('step-node-4');
-
-  const evalForm = document.getElementById('form-submit-ballot');
-  const completedBox = document.getElementById('voting-completed-box');
-  const closeVoteBtn = document.getElementById('btn-host-close-voting');
-  const reopenVoteBtn = document.getElementById('btn-host-reopen-voting');
-  const statusPill = document.getElementById('voting-status-pill');
-
-  const isClosed = s.session.status === 'CLOSED';
-  const isHost = state.currentUser && !!state.currentUser.is_host;
-
-  if (isClosed) {
-    if (step4) step4.className = 'vstep-item completed';
-    if (statusPill) {
-      statusPill.innerHTML = '<span class="pulse-dot" style="background:#fbbc04; width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px;"></span>Session Closed';
-      statusPill.className = 'status-pill pill-amber';
-    }
-    if (partPillEl) partPillEl.textContent = 'Session Closed (Standings Revealed)';
-    if (isHost) {
-      if (closeVoteBtn) closeVoteBtn.classList.add('hidden');
-      if (reopenVoteBtn) reopenVoteBtn.classList.remove('hidden');
-    }
+  if (isHost) {
+    if (openLaunchBtn) openLaunchBtn.classList.remove('hidden');
+    if (closeVoteBtn) closeVoteBtn.classList.remove('hidden');
+    if (reopenVoteBtn) reopenVoteBtn.classList.add('hidden');
   } else {
-    if (step4) step4.className = 'vstep-item';
-    if (statusPill) {
-      statusPill.innerHTML = '<span class="pulse-dot" style="background:#34a853; width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px;"></span>Active Round';
-      statusPill.className = 'status-pill pill-green';
-    }
-    if (partPillEl) partPillEl.textContent = ballots >= eligible ? 'All Teammates Evaluated' : 'Active Round in Progress';
-    if (isHost) {
-      if (closeVoteBtn) closeVoteBtn.classList.remove('hidden');
-      if (reopenVoteBtn) reopenVoteBtn.classList.add('hidden');
-    }
+    if (openLaunchBtn) openLaunchBtn.classList.add('hidden');
+    if (closeVoteBtn) closeVoteBtn.classList.add('hidden');
+    if (reopenVoteBtn) reopenVoteBtn.classList.add('hidden');
   }
 
   // Token shield state
   const tokenShieldText = document.getElementById('crypto-token-status-text');
   const blindTokenCode = document.getElementById('display-blind-token');
-  const stepperTokenLabel = document.getElementById('stepper-token-label');
 
   if (state.unlinkedBallotToken) {
-    if (step2) step2.className = 'vstep-item completed';
-    if (stepperTokenLabel) stepperTokenLabel.textContent = 'Decoupled Token Active';
     if (tokenShieldText) tokenShieldText.textContent = `HMAC Token Active: ${state.unlinkedBallotToken.slice(0, 10)}... (zero identity linkage in ballot box).`;
     if (blindTokenCode) {
       blindTokenCode.textContent = state.unlinkedBallotToken;
       blindTokenCode.style.display = 'inline-block';
     }
   } else {
-    if (step2) step2.className = 'vstep-item active';
-    if (stepperTokenLabel) stepperTokenLabel.textContent = 'Auto-signed on submit';
     if (tokenShieldText) tokenShieldText.textContent = 'A decoupled blind cryptographic token will be automatically requested and burned on submit.';
     if (blindTokenCode) blindTokenCode.style.display = 'none';
   }
@@ -1268,11 +1350,11 @@ function renderVotingSession() {
 
     candidatesList.forEach((cand, idx) => {
       const candId = cand.id || cand.candidate_member_id;
-      const isSelf = state.currentUser && (state.currentUser.id === candId);
-      const candName = cand.name || cand.candidate_name || cand.label || 'Engineer';
-      const candRole = cand.role || cand.candidate_role || 'Developer';
-      const candTrack = cand.team_track || 'general';
-      const initials = candName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'TM';
+      const isSelf = (!isQualityType && state.currentUser && state.currentUser.id === candId);
+      const candName = cand.name || cand.candidate_name || cand.label || (isQualityType ? 'Project Track' : 'Engineer');
+      const candRole = cand.role || cand.candidate_role || (isQualityType ? 'Milestone Pillar' : 'Developer');
+      const candTrack = cand.team_track || (isQualityType ? 'milestone' : 'general');
+      const initials = candName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || (isQualityType ? 'PT' : 'TM');
 
       const card = document.createElement('div');
       const isDefaultSelected = !isSelf && !hasSelected;
@@ -1316,7 +1398,7 @@ function renderVotingSession() {
   }
 
   // Render Live Leaderboard Standings
-  renderTallyMeters(s.tally || [], s.candidates || s.options || []);
+  renderTallyMeters(s.tally || [], s.candidates || s.options || [], 'tally-bars-display');
 
   // Initialize star rating showcase
   initStarRatingSelector();
@@ -1379,8 +1461,8 @@ function initStarRatingSelector() {
   });
 }
 
-function renderTallyMeters(tally, candidatesList = []) {
-  const container = document.getElementById('tally-bars-display');
+function renderTallyMeters(tally, candidatesList = [], containerId = 'tally-bars-display') {
+  const container = document.getElementById(containerId);
   if (!container) return;
   container.innerHTML = '';
 
@@ -1447,7 +1529,7 @@ function renderTallyMeters(tally, candidatesList = []) {
 
 async function claimBlindToken() {
   try {
-    const sessionId = state.currentVotingSessionId || 1;
+    const sessionId = state.votingSession?.session?.id || state.currentVotingSessionId || '';
     const res = await fetch('/api/voting/token', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1462,7 +1544,7 @@ async function claimBlindToken() {
     }
 
     state.unlinkedBallotToken = data.token;
-    sessionStorage.setItem('ballot_token_' + sessionId, data.token);
+    if (sessionId) sessionStorage.setItem('ballot_token_' + sessionId, data.token);
     showToast('Blind Ballot Token issued! Your identity is decoupled from this token.');
     await loadVotingSession();
   } catch (err) {
@@ -1475,13 +1557,13 @@ async function castAnonymousBallot(e) {
 
   const selected = document.querySelector('#ballot-options-container .candidate-card-btn.selected');
   if (!selected) {
-    return showToast('Please select a teammate to evaluate', true);
+    return showToast('Please select an item to evaluate', true);
   }
 
   const candidateId = parseInt(selected.dataset.candidateId, 10);
   const ratingInput = document.getElementById('selected-ballot-rating');
   const rating = ratingInput ? parseInt(ratingInput.value, 10) : 5;
-  const sessionId = state.currentVotingSessionId || 1;
+  const sessionId = state.votingSession?.session?.id || state.currentVotingSessionId || '';
 
   // Auto-acquire token seamlessly if user doesn't have one yet
   let token = state.unlinkedBallotToken;
@@ -1499,7 +1581,7 @@ async function castAnonymousBallot(e) {
       }
       token = tokenData.token;
       state.unlinkedBallotToken = token;
-      sessionStorage.setItem('ballot_token_' + sessionId, token);
+      if (sessionId) sessionStorage.setItem('ballot_token_' + sessionId, token);
     } catch (err) {
       showToast('Network error securing anonymous token', true);
       return;
@@ -1521,7 +1603,7 @@ async function castAnonymousBallot(e) {
     }
 
     state.unlinkedBallotToken = null;
-    sessionStorage.removeItem('ballot_token_' + sessionId);
+    if (sessionId) sessionStorage.removeItem('ballot_token_' + sessionId);
 
     // Show success card
     const evalForm = document.getElementById('form-submit-ballot');
@@ -1529,8 +1611,8 @@ async function castAnonymousBallot(e) {
     if (evalForm) evalForm.classList.add('hidden');
     if (completedBox) completedBox.classList.remove('hidden');
 
-    const candName = selected.dataset.candidateName || 'Teammate';
-    showToast(`Anonymous evaluation of ${rating}/5.0 stars for ${candName} recorded.`);
+    const candName = selected.dataset.candidateName || 'Item';
+    showToast(`Anonymous evaluation of ${rating}/5.0 stars recorded for ${candName}.`);
     await loadVotingSession();
     await loadPersonalDashboard();
   } catch (err) {
@@ -1540,12 +1622,12 @@ async function castAnonymousBallot(e) {
 
 async function hostCloseVotingSession() {
   if (!state.currentUser || !state.currentUser.is_host) {
-    showToast('Host Authorization Required: Only the Team Host can close a voting session.', true);
+    showToast('Host Authorization Required: Only the Team Host can close a review session.', true);
     return;
   }
 
   try {
-    const sessionId = state.currentVotingSessionId || 1;
+    const sessionId = state.votingSession?.session?.id || state.currentVotingSessionId || '';
     const res = await fetch('/api/voting/close', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1556,21 +1638,22 @@ async function hostCloseVotingSession() {
       showToast(data.error || 'Failed to close session', true);
       return;
     }
-    showToast('Review session closed. Aggregate tallies revealed!');
+    showToast('Review round closed! Final standings revealed.');
     await loadVotingSession();
+    await loadPersonalDashboard();
   } catch (err) {
-    showToast('Error closing voting session', true);
+    showToast('Error closing review session', true);
   }
 }
 
 async function hostReopenVotingSession() {
   if (!state.currentUser || !state.currentUser.is_host) {
-    showToast('Host Authorization Required: Only the Team Host can reopen a voting session.', true);
+    showToast('Host Authorization Required: Only the Team Host can reopen a review session.', true);
     return;
   }
 
   try {
-    const sessionId = state.currentVotingSessionId || 1;
+    const sessionId = state.votingSession?.session?.id || state.currentVotingSessionId || '';
     const res = await fetch('/api/voting/reopen', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -1583,9 +1666,106 @@ async function hostReopenVotingSession() {
     }
     showToast('Review session reopened for submissions!');
     await loadVotingSession();
+    await loadPersonalDashboard();
   } catch (err) {
-    showToast('Error reopening voting session', true);
+    showToast('Error reopening review session', true);
   }
+}
+
+async function submitLaunchVotingSession(e) {
+  e.preventDefault();
+  if (!state.currentUser || !state.currentUser.is_host) {
+    showToast('Host Authorization Required: Only the Team Lead can launch a review session.', true);
+    return;
+  }
+
+  const typeSelect = document.getElementById('voting-launch-type');
+  const titleInput = document.getElementById('voting-launch-title');
+  const metricInput = document.getElementById('voting-launch-metric');
+  const descInput = document.getElementById('voting-launch-desc');
+
+  const session_type = typeSelect ? typeSelect.value : 'PEER_PERFORMANCE';
+  const title = titleInput ? titleInput.value.trim() : '';
+  const metric = metricInput ? metricInput.value.trim() : '';
+  const description = descInput ? descInput.value.trim() : '';
+
+  let options = [];
+  if (session_type === 'PROJECT_QUALITY') {
+    document.querySelectorAll('#group-launch-quality-pillars .quality-pillar-input').forEach(inp => {
+      if (inp.value && inp.value.trim()) options.push(inp.value.trim());
+    });
+  }
+
+  try {
+    const res = await fetch('/api/voting/create', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_type, title, metric, description, options })
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Failed to launch review session', true);
+      return;
+    }
+
+    document.getElementById('modal-launch-voting')?.close();
+    showToast(`Review session "${title}" successfully launched!`);
+    state.currentVotingSessionId = data.session_id;
+    await loadVotingSession();
+    await loadPersonalDashboard();
+  } catch (err) {
+    showToast('Network error launching review session', true);
+  }
+}
+
+function initLaunchVotingModal() {
+  const modal = document.getElementById('modal-launch-voting');
+  const form = document.getElementById('form-launch-voting');
+  const typeSelect = document.getElementById('voting-launch-type');
+  const pillarsGroup = document.getElementById('group-launch-quality-pillars');
+  const titleInput = document.getElementById('voting-launch-title');
+  const metricInput = document.getElementById('voting-launch-metric');
+  const descInput = document.getElementById('voting-launch-desc');
+  const hintEl = document.getElementById('voting-type-hint');
+
+  const openBtns = [
+    document.getElementById('btn-open-launch-voting'),
+    document.getElementById('btn-idle-launch-voting'),
+    document.getElementById('btn-closed-new-round')
+  ];
+
+  openBtns.forEach(btn => {
+    btn?.addEventListener('click', () => {
+      if (modal) modal.showModal();
+    });
+  });
+
+  document.getElementById('btn-close-launch-voting')?.addEventListener('click', () => {
+    modal?.close();
+  });
+  document.getElementById('btn-cancel-launch-voting')?.addEventListener('click', () => {
+    modal?.close();
+  });
+
+  if (typeSelect) {
+    typeSelect.addEventListener('change', () => {
+      if (typeSelect.value === 'PROJECT_QUALITY') {
+        if (pillarsGroup) pillarsGroup.classList.remove('hidden');
+        if (titleInput) titleInput.value = 'Sprint 1 Project Quality & Milestone Review';
+        if (metricInput) metricInput.value = 'Code Quality, Architecture Integrity & Deliverable Stability';
+        if (descInput) descInput.value = 'Evaluate sprint deliverables, code quality, test coverage, and documentation stability across project tracks.';
+        if (hintEl) hintEl.textContent = 'Teammates evaluate milestone stability, API architecture, and sprint deliverable tracks on a 1–5 scale.';
+      } else {
+        if (pillarsGroup) pillarsGroup.classList.add('hidden');
+        if (titleInput) titleInput.value = 'Sprint 1 Peer Review & Contribution Standings';
+        if (metricInput) metricInput.value = 'Sprint Contribution, Technical Reliability & Team Collaboration';
+        if (descInput) descInput.value = 'Anonymous sprint contribution ratings (1–5 Stars). Cryptographically decoupled via HMAC blind tokens with zero identity linkage.';
+        if (hintEl) hintEl.textContent = 'Teammates rate each individual member across sprint velocity, architecture leadership, and peer support on a 1–5 scale.';
+      }
+    });
+  }
+
+  form?.addEventListener('submit', submitLaunchVotingSession);
 }
 
 // -------------------------------------------------------------
@@ -3375,6 +3555,8 @@ function setupEventListeners() {
   });
   document.getElementById('btn-host-close-voting')?.addEventListener('click', hostCloseVotingSession);
   document.getElementById('btn-host-reopen-voting')?.addEventListener('click', hostReopenVotingSession);
+  document.getElementById('btn-closed-reopen-round')?.addEventListener('click', hostReopenVotingSession);
+  initLaunchVotingModal();
   document.getElementById('btn-refresh-audit')?.addEventListener('click', loadAuditTrail);
   document.getElementById('btn-trigger-backup-snap')?.addEventListener('click', triggerDisasterBackup);
 

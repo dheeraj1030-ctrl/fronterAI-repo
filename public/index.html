@@ -324,71 +324,59 @@
         <!-- ======================================================== -->
         <!-- MODULE 3: PEER REVIEW & 1-5 STAR VOTING -->
         <!-- ======================================================== -->
+        <!-- ======================================================== -->
+        <!-- MODULE 3: PEER REVIEW & 1-5 STAR VOTING -->
+        <!-- ======================================================== -->
         <section id="view-voting" class="workspace-view">
           <div class="view-header">
             <div>
               <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
                 <h2 class="view-title" style="margin: 0;">Peer Review &amp; Recognition</h2>
-                <span class="status-pill pill-green" id="voting-status-pill"><span class="pulse-dot" style="background:#34a853; width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px;"></span>Active Round</span>
+                <span class="status-pill pill-grey" id="voting-status-pill"><span class="pulse-dot" style="background:#9aa0a6; width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px;"></span>No Active Round</span>
               </div>
-              <p class="view-subtitle">Anonymous sprint contribution ratings (1–5 Stars). Cryptographically decoupled via HMAC blind tokens with zero identity linkage.</p>
+              <p class="view-subtitle" id="voting-view-subtitle">Anonymous sprint contribution ratings (1–5 Stars). Cryptographically decoupled via HMAC blind tokens with zero identity linkage.</p>
             </div>
             <div class="header-action-group">
-              <button class="btn btn-outlined" id="btn-host-close-voting">Close Review &amp; Reveal Standings</button>
+              <button class="btn btn-filled hidden" id="btn-open-launch-voting">+ Launch Review Round</button>
+              <button class="btn btn-outlined hidden" id="btn-host-close-voting">Close Review &amp; Reveal Standings</button>
               <button class="btn btn-outlined hidden" id="btn-host-reopen-voting">Reopen Review Round</button>
             </div>
           </div>
 
-          <!-- Cryptographic Decoupling Protocol Stepper -->
-          <div class="voting-stepper-surface card" style="margin-bottom: 16px;">
-            <div class="voting-protocol-steps">
-              <div class="vstep-item completed" id="step-node-1">
-                <div class="vstep-icon">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                </div>
-                <div class="vstep-text">
-                  <span class="vstep-title">1. Verified Member</span>
-                  <span class="vstep-sub" id="stepper-member-label">Alice Vance</span>
-                </div>
-              </div>
-              <div class="vstep-arrow">→</div>
+          <!-- Container 1: Idle State (No Active Voting Session) -->
+          <div id="voting-idle-container" class="card" style="padding: 48px 24px; text-align: center; margin-bottom: 24px;">
+            <div style="width: 52px; height: 52px; border-radius: 50%; background: var(--bg-surface-elevated); border: 1px solid var(--border-default); display: inline-flex; align-items: center; justify-content: center; margin-bottom: 14px; color: var(--google-blue);">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>
+            </div>
+            <h3 style="font-size: 17px; font-weight: 600; color: var(--text-primary); margin-bottom: 6px;">No Active Review Round</h3>
+            <p style="font-size: 13px; color: var(--text-secondary); max-width: 500px; margin: 0 auto 16px auto; line-height: 1.5;">
+              There is currently no active review session open for submissions. The Team Lead can initiate an anonymous peer review or project quality milestone evaluation at any time.
+            </p>
+            <button type="button" class="btn btn-filled hidden" id="btn-idle-launch-voting">+ Launch Review Round</button>
+          </div>
 
-              <div class="vstep-item active" id="step-node-2">
-                <div class="vstep-icon" id="step-node-2-icon">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+          <!-- Container 2: Closed State Banner & Final Leaderboard -->
+          <div id="voting-closed-container" class="card hidden" style="padding: 24px; margin-bottom: 24px;">
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 14px; margin-bottom: 18px; border-bottom: 1px solid var(--border-subtle); padding-bottom: 14px;">
+              <div>
+                <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                  <h3 style="font-size: 16px; font-weight: 600; color: var(--text-primary); margin: 0;" id="closed-round-title">Sprint Standings &amp; Aggregate Results</h3>
+                  <span class="status-pill pill-amber">Concluded</span>
                 </div>
-                <div class="vstep-text">
-                  <span class="vstep-title">2. Blind HMAC Token</span>
-                  <span class="vstep-sub" id="stepper-token-label">Identity decoupled</span>
-                </div>
+                <p style="font-size: 12.5px; color: var(--text-secondary); margin: 0;" id="closed-round-desc">Submissions have concluded for this round. Final cryptographic ratings and rankings are listed below.</p>
               </div>
-              <div class="vstep-arrow">→</div>
-
-              <div class="vstep-item" id="step-node-3">
-                <div class="vstep-icon">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
-                </div>
-                <div class="vstep-text">
-                  <span class="vstep-title">3. 1–5 Star Rating</span>
-                  <span class="vstep-sub">Unlinked drop</span>
-                </div>
+              <div class="header-action-group">
+                <button type="button" class="btn btn-filled btn-sm hidden" id="btn-closed-new-round">+ Launch New Round</button>
+                <button type="button" class="btn btn-outlined btn-sm hidden" id="btn-closed-reopen-round">Reopen Submissions</button>
               </div>
-              <div class="vstep-arrow">→</div>
-
-              <div class="vstep-item" id="step-node-4">
-                <div class="vstep-icon">
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
-                </div>
-                <div class="vstep-text">
-                  <span class="vstep-title">4. Recognition Standings</span>
-                  <span class="vstep-sub">Aggregated reveal</span>
-                </div>
-              </div>
+            </div>
+            <div class="standings-cards-list" id="closed-tally-bars-display">
+              <!-- Populated with finalized standings -->
             </div>
           </div>
 
-          <!-- Main Voting Grid -->
-          <div class="voting-workspace-grid">
+          <!-- Container 3: Active Voting Session Grid -->
+          <div id="voting-active-container" class="voting-workspace-grid hidden">
             
             <!-- Left Column: Interactive Evaluation Canvas -->
             <div class="voting-main-card card">
@@ -397,29 +385,29 @@
                   <span class="metric-icon">
                     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>
                   </span>
-                  <span class="metric-name">Single Metric: Sprint Contribution &amp; Team Collaboration</span>
+                  <span class="metric-name" id="voting-active-metric-chip">Evaluation Focus</span>
                 </div>
-                <div class="session-round-tag" id="voting-session-headline">Sprint 1 Evaluation Round</div>
+                <div class="session-round-tag" id="voting-session-headline">Active Evaluation Round</div>
               </div>
 
-              <!-- Live Peer Evaluation Form (Always interactive!) -->
+              <!-- Live Peer Evaluation Form -->
               <form id="form-submit-ballot" class="peer-evaluation-form">
                 
-                <!-- Section 1: Choose Teammate -->
+                <!-- Section 1: Choose Target -->
                 <div class="eval-section">
                   <div class="eval-section-title">
-                    <span>1. Select Teammate to Evaluate</span>
-                    <span class="eval-helper-hint">Pick any teammate to submit an anonymous 1–5 star rating</span>
+                    <span id="label-select-candidate-step">1. Select Teammate to Evaluate</span>
+                    <span class="eval-helper-hint" id="hint-select-candidate-step">Pick an item to submit an anonymous 1–5 star rating</span>
                   </div>
                   <div class="candidate-roster-grid" id="ballot-options-container">
-                    <!-- Populated dynamically with rich candidate cards -->
+                    <!-- Populated dynamically with candidate cards -->
                   </div>
                 </div>
 
                 <!-- Section 2: Interactive 1-5 Star Selector -->
                 <div class="eval-section" style="margin-top: 18px;">
                   <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
-                    <div class="eval-section-title" style="margin-bottom: 0;">2. Rate Sprint Contribution &amp; Collaboration</div>
+                    <div class="eval-section-title" id="label-rating-step" style="margin-bottom: 0;">2. Rate Sprint Contribution &amp; Collaboration</div>
                     <div id="rating-score-label" class="rating-dynamic-score">5.0 / 5.0 (Outstanding Impact)</div>
                   </div>
                   <p class="eval-score-explanation" id="rating-score-explainer">Exceptional sprint velocity, architecture leadership, and proactive peer support.</p>
@@ -538,19 +526,6 @@
                 <div class="standings-cards-list" id="tally-bars-display">
                   <!-- Filled dynamically with candidate ranking cards -->
                 </div>
-              </div>
-
-              <!-- Zero-Identity Technical Privacy Guarantee -->
-              <div class="card privacy-guarantee-card">
-                <div class="guarantee-header">
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8ab4f8" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
-                  <span>Zero-Knowledge Privacy Proof</span>
-                </div>
-                <ul class="guarantee-points">
-                  <li><strong>Decoupled Token:</strong> Server signs a blind HMAC token during claim.</li>
-                  <li><strong>Zero Member Link:</strong> Ballot submissions record rating and candidate ID only; no member ID or IP is logged.</li>
-                  <li><strong>Collision Guard:</strong> Unlinked token burns on commit to prevent double voting.</li>
-                </ul>
               </div>
 
             </div>
@@ -1177,6 +1152,64 @@
         <div class="dialog-actions">
           <button type="button" class="btn btn-outlined" id="btn-cancel-send-feedback">Cancel</button>
           <button type="submit" class="btn btn-filled">Share Feedback</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- MODAL: LAUNCH REVIEW ROUND (HOST ONLY) -->
+  <dialog id="modal-launch-voting" class="app-dialog">
+    <div class="dialog-content" style="max-width: 540px;">
+      <div class="dialog-header">
+        <h3 class="dialog-title">Launch Review &amp; Evaluation Round</h3>
+        <button type="button" class="btn-icon" id="btn-close-launch-voting" aria-label="Close launch modal">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
+      </div>
+      <form id="form-launch-voting">
+        <div class="form-group">
+          <label for="voting-launch-type">Review Type</label>
+          <select id="voting-launch-type" class="form-select" required>
+            <option value="PEER_PERFORMANCE" selected>Type 1: Anonymous Peer Performance Review (Evaluate Individual Teammates)</option>
+            <option value="PROJECT_QUALITY">Type 2: Project Quality &amp; Milestone Review (Evaluate Sprint Deliverables &amp; Stability)</option>
+          </select>
+          <p class="form-hint" id="voting-type-hint" style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+            Teammates rate each individual member across sprint velocity, architecture leadership, and peer support on a 1–5 scale.
+          </p>
+        </div>
+
+        <div class="form-group">
+          <label for="voting-launch-title">Session Title</label>
+          <input type="text" id="voting-launch-title" required class="form-input" placeholder="e.g. Sprint 2 Peer Recognition &amp; Technical Impact" value="Sprint 1 Peer Review &amp; Contribution Standings">
+        </div>
+
+        <div class="form-group">
+          <label for="voting-launch-metric">Evaluation Metric / Focus Area</label>
+          <input type="text" id="voting-launch-metric" required class="form-input" placeholder="e.g. Sprint Velocity, Code Quality &amp; Peer Collaboration" value="Sprint Contribution, Technical Reliability &amp; Team Collaboration">
+        </div>
+
+        <div class="form-group">
+          <label for="voting-launch-desc">Description &amp; Instructions</label>
+          <textarea id="voting-launch-desc" rows="2" class="form-textarea" placeholder="Instructions for voters...">Anonymous sprint contribution ratings (1–5 Stars). Cryptographically decoupled via HMAC blind tokens with zero identity linkage.</textarea>
+        </div>
+
+        <!-- Pillar items for Type 2 (Project Quality) -->
+        <div class="form-group hidden" id="group-launch-quality-pillars">
+          <label>Project Quality Evaluation Tracks</label>
+          <p class="form-hint" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 6px;">
+            Options teammates will evaluate for this milestone:
+          </p>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <input type="text" class="form-input quality-pillar-input" value="Backend APIs &amp; Cloudflare Workers Architecture">
+            <input type="text" class="form-input quality-pillar-input" value="Frontend UI/UX &amp; Google Workspace Aesthetics">
+            <input type="text" class="form-input quality-pillar-input" value="Database Integrity, Migrations &amp; OCC Concurrency">
+            <input type="text" class="form-input quality-pillar-input" value="Sprint Deliverable Sign-Off &amp; Peer Collaboration">
+          </div>
+        </div>
+
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-outlined" id="btn-cancel-launch-voting">Cancel</button>
+          <button type="submit" class="btn btn-filled">Open Live Voting Session</button>
         </div>
       </form>
     </div>

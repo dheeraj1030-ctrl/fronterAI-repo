@@ -329,8 +329,8 @@ export async function onRequest(context) {
       });
 
       const liveMeeting = myEvents.find(ev => ev.is_live === 1 && (ev.event_type === 'MEETING' || ev.event_type === 'RETRO')) || null;
-      const activeVote = await env.DB.prepare('SELECT * FROM voting_sessions WHERE id = 1').first();
-      const hasVoted = await env.DB.prepare('SELECT * FROM voting_eligibility WHERE session_id = 1 AND member_id = ?').bind(member.id).first();
+      const activeVote = await env.DB.prepare("SELECT * FROM voting_sessions WHERE status = 'ACTIVE' ORDER BY id DESC LIMIT 1").first();
+      const hasVoted = activeVote ? await env.DB.prepare('SELECT * FROM voting_eligibility WHERE session_id = ? AND member_id = ?').bind(activeVote.id, member.id).first() : null;
 
       const completed = myTasks.filter(t => t.status === 'COMPLETED').length;
       const inProgress = myTasks.filter(t => t.status === 'IN_PROGRESS').length;
@@ -570,25 +570,68 @@ export async function onRequest(context) {
     // --------------------------------------------------------------------------
     if ((pathname === '/api/voting/current' || pathname === '/api/voting/sessions') && method === 'GET') {
       const member = await getAuthMember(request, env);
-      const sessionId = parseInt(url.searchParams.get('session_id') || '1', 10);
-      let session = await env.DB.prepare('SELECT * FROM voting_sessions WHERE id = ?').bind(sessionId).first();
-      if (!session) session = await env.DB.prepare('SELECT * FROM voting_sessions ORDER BY id ASC LIMIT 1').first();
-      if (!session) return jsonResponse({ error: 'No voting session found' }, 404);
 
-      const allSessionsRes = await env.DB.prepare('SELECT id, title, description, session_type, status FROM voting_sessions ORDER BY id ASC').all();
-      
-      // All allowlisted members available for peer evaluation
+      // Auto-archive any legacy default seed session if present so default state is unhosted
+      await env.DB.prepare("UPDATE voting_sessions SET status = 'ARCHIVED' WHERE status = 'ACTIVE' AND (created_by <= 0 OR title = 'Sprint 1 Peer Review & Contribution Standings')").run();
+
+      const requestedSessionId = url.searchParams.get('session_id');
+      let session = null;
+      if (requestedSessionId) {
+        session = await env.DB.prepare('SELECT * FROM voting_sessions WHERE id = ?').bind(requestedSessionId).first();
+      } else {
+        // Priority 1: Check for active session
+        session = await env.DB.prepare("SELECT * FROM voting_sessions WHERE status = 'ACTIVE' ORDER BY id DESC LIMIT 1").first();
+      }
+
+      // If no active session, check for latest closed session so final standings can be reviewed
+      let closedSession = null;
+      if (!session) {
+        closedSession = await env.DB.prepare("SELECT * FROM voting_sessions WHERE status = 'CLOSED' ORDER BY id DESC LIMIT 1").first();
+      }
+
+      const activeTarget = session || closedSession;
+
+      // Allowlisted members
       const membersRes = await env.DB.prepare('SELECT id, name, role, team_track, email FROM members WHERE is_allowed = 1 ORDER BY id ASC').all();
-      const candidates = membersRes.results || [];
+      let candidates = membersRes.results || [];
+
+      if (!activeTarget) {
+        return jsonResponse({
+          active: false,
+          hasActiveSession: false,
+          hasClosedSession: false,
+          session: null,
+          candidates,
+          totalBallots: 0,
+          totalEligible: candidates.length,
+          isRevealed: false,
+          isHost: !!(member && member.is_host),
+          tally: null
+        });
+      }
+
+      // If Project Quality session, load options from voting_options
+      if (activeTarget.session_type === 'PROJECT_QUALITY') {
+        const optRes = await env.DB.prepare('SELECT id, label FROM voting_options WHERE session_id = ? ORDER BY id ASC').bind(activeTarget.id).all();
+        if (optRes?.results && optRes.results.length > 0) {
+          candidates = optRes.results.map(opt => ({
+            id: opt.id,
+            name: opt.label,
+            role: 'Sprint Deliverable Track',
+            team_track: 'milestone'
+          }));
+        }
+      }
 
       const eligibility = member
-        ? await env.DB.prepare('SELECT * FROM voting_eligibility WHERE session_id = ? AND member_id = ?').bind(session.id, member.id).first()
+        ? await env.DB.prepare('SELECT * FROM voting_eligibility WHERE session_id = ? AND member_id = ?').bind(activeTarget.id, member.id).first()
         : null;
 
-      const ballotsCount = await env.DB.prepare('SELECT COUNT(*) as count FROM ballots WHERE session_id = ?').bind(session.id).first();
+      const ballotsCount = await env.DB.prepare('SELECT COUNT(*) as count FROM ballots WHERE session_id = ?').bind(activeTarget.id).first();
       const totalBallots = ballotsCount?.count || 0;
-      const totalEligible = candidates.length || session.total_eligible || 8;
-      const isRevealed = totalBallots >= totalEligible || session.status === 'CLOSED';
+      const totalEligible = candidates.length || activeTarget.total_eligible || 8;
+      const isClosed = activeTarget.status === 'CLOSED';
+      const isRevealed = isClosed || totalBallots >= totalEligible;
 
       let tally = null;
       if (isRevealed) {
@@ -605,13 +648,13 @@ export async function onRequest(context) {
               SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) as stars_1
             FROM ballots 
             WHERE session_id = ? AND (candidate_member_id = ? OR option_id = ?)
-          `).bind(session.id, cand.id, cand.id).first();
+          `).bind(activeTarget.id, cand.id, cand.id).first();
 
           tally.push({
             candidate_id: cand.id,
-            candidate_name: cand.name,
-            candidate_role: cand.role,
-            team_track: cand.team_track,
+            candidate_name: cand.name || cand.label,
+            candidate_role: cand.role || 'Sprint Deliverable',
+            team_track: cand.team_track || 'milestone',
             total_ratings: stats?.count || 0,
             avg_rating: stats?.count ? (Math.round((stats.avg_rating || 0) * 10) / 10) : 0,
             breakdown: {
@@ -626,12 +669,10 @@ export async function onRequest(context) {
       }
 
       return jsonResponse({
-        session: {
-          ...session,
-          title: session.title || 'Sprint 1 Peer Review & Contribution Standings',
-          metric: 'Sprint Contribution, Technical Reliability & Team Collaboration'
-        },
-        allSessions: allSessionsRes.results || [session],
+        active: activeTarget.status === 'ACTIVE',
+        hasActiveSession: activeTarget.status === 'ACTIVE',
+        hasClosedSession: isClosed,
+        session: activeTarget,
         candidates,
         userHasClaimedToken: !!eligibility,
         totalBallots,
@@ -642,14 +683,54 @@ export async function onRequest(context) {
       });
     }
 
+    if (pathname === '/api/voting/create' && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Unauthorized: Only Team Lead can launch a review session' }, 403);
+      const { title, description, session_type, metric, options } = await request.json();
+
+      const type = (session_type === 'PROJECT_QUALITY') ? 'PROJECT_QUALITY' : 'PEER_PERFORMANCE';
+      const cleanTitle = (title || (type === 'PROJECT_QUALITY' ? 'Sprint 1 Project Quality & Milestone Review' : 'Sprint 1 Peer Review & Contribution Standings')).trim();
+      const cleanDesc = (description || metric || (type === 'PROJECT_QUALITY' ? 'Deliverable Quality & Architecture Stability' : 'Sprint Contribution & Team Collaboration')).trim();
+
+      const membersCount = await env.DB.prepare('SELECT COUNT(*) as count FROM members WHERE is_allowed = 1').first();
+      const totalEligible = membersCount?.count || 8;
+
+      // Archive any active sessions before opening the new one
+      await env.DB.prepare("UPDATE voting_sessions SET status = 'ARCHIVED' WHERE status = 'ACTIVE'").run();
+
+      const insertRes = await env.DB.prepare(`
+        INSERT INTO voting_sessions (title, description, session_type, status, total_eligible, created_by, created_at)
+        VALUES (?, ?, ?, 'ACTIVE', ?, ?, datetime('now'))
+      `).bind(cleanTitle, cleanDesc, type, totalEligible, member.id).run();
+
+      const newSessionId = insertRes.meta.last_row_id;
+
+      if (type === 'PROJECT_QUALITY' && Array.isArray(options)) {
+        for (const optLabel of options) {
+          if (typeof optLabel === 'string' && optLabel.trim()) {
+            await env.DB.prepare('INSERT INTO voting_options (session_id, label) VALUES (?, ?)').bind(newSessionId, optLabel.trim()).run();
+          }
+        }
+      }
+
+      await logAudit(env, member.handle, 'CREATE_VOTING', 'voting', `Launched ${type} review session #${newSessionId}: "${cleanTitle}"`);
+      return jsonResponse({ success: true, session_id: newSessionId });
+    }
+
     if ((pathname === '/api/voting/token' || pathname === '/api/voting/collect-token') && method === 'POST') {
       const member = await getAuthMember(request, env);
       if (!member) return jsonResponse({ error: 'Authentication required' }, 401);
-      const body = await request.json();
-      const sessionId = body.session_id || 1;
-      const session = await env.DB.prepare("SELECT * FROM voting_sessions WHERE id = ? AND status = 'ACTIVE'").bind(sessionId).first();
-      if (!session) return jsonResponse({ error: 'Voting session is not active' }, 400);
+      const body = await request.json().catch(() => ({}));
+      let session = null;
+      if (body.session_id) {
+        session = await env.DB.prepare("SELECT * FROM voting_sessions WHERE id = ? AND status = 'ACTIVE'").bind(body.session_id).first();
+      }
+      if (!session) {
+        session = await env.DB.prepare("SELECT * FROM voting_sessions WHERE status = 'ACTIVE' ORDER BY id DESC LIMIT 1").first();
+      }
+      if (!session) return jsonResponse({ error: 'No active review session is currently open for submissions' }, 400);
 
+      const sessionId = session.id;
       const alreadyClaimed = await env.DB.prepare('SELECT * FROM voting_eligibility WHERE session_id = ? AND member_id = ?').bind(sessionId, member.id).first();
       if (alreadyClaimed) return jsonResponse({ error: 'You have already claimed a ballot token for this session.' }, 400);
 
@@ -666,6 +747,10 @@ export async function onRequest(context) {
       const targetCandidateId = candidate_id || option_id;
       const numRating = Math.max(1, Math.min(5, parseInt(rating || 5, 10)));
       if (!token || !session_id || !targetCandidateId) return jsonResponse({ error: 'Missing token or ballot payload' }, 400);
+
+      const session = await env.DB.prepare("SELECT * FROM voting_sessions WHERE id = ? AND status = 'ACTIVE'").bind(session_id).first();
+      if (!session) return jsonResponse({ error: 'Review session is closed or inactive' }, 400);
+
       const parts = token.split(':');
       if (parts.length !== 3) return jsonResponse({ error: 'Malformed ballot token' }, 400);
       const [tokenSessionId, nonce, providedSig] = parts;
@@ -683,20 +768,35 @@ export async function onRequest(context) {
 
     if (pathname === '/api/voting/close' && method === 'POST') {
       const member = await getAuthMember(request, env);
-      if (!member || !member.is_host) return jsonResponse({ error: 'Unauthorized' }, 403);
-      const { session_id } = await request.json();
-      await env.DB.prepare("UPDATE voting_sessions SET status = 'CLOSED' WHERE id = ?").bind(session_id || 1).run();
-      await logAudit(env, member.handle, 'CLOSE_VOTING', 'voting', `Closed session #${session_id}`);
-      return jsonResponse({ success: true });
+      if (!member || !member.is_host) return jsonResponse({ error: 'Unauthorized: Only Team Lead can close a review round' }, 403);
+      const body = await request.json().catch(() => ({}));
+      let targetId = body.session_id;
+      if (!targetId) {
+        const active = await env.DB.prepare("SELECT id FROM voting_sessions WHERE status = 'ACTIVE' ORDER BY id DESC LIMIT 1").first();
+        targetId = active?.id;
+      }
+      if (!targetId) return jsonResponse({ error: 'No active review session found to close' }, 400);
+
+      await env.DB.prepare("UPDATE voting_sessions SET status = 'CLOSED', closed_at = datetime('now') WHERE id = ?").bind(targetId).run();
+      await logAudit(env, member.handle, 'CLOSE_VOTING', 'voting', `Closed review session #${targetId}`);
+      return jsonResponse({ success: true, session_id: targetId });
     }
 
     if (pathname === '/api/voting/reopen' && method === 'POST') {
       const member = await getAuthMember(request, env);
-      if (!member || !member.is_host) return jsonResponse({ error: 'Unauthorized' }, 403);
-      const { session_id } = await request.json();
-      await env.DB.prepare("UPDATE voting_sessions SET status = 'ACTIVE' WHERE id = ?").bind(session_id || 1).run();
-      await logAudit(env, member.handle, 'REOPEN_VOTING', 'voting', `Reopened session #${session_id}`);
-      return jsonResponse({ success: true });
+      if (!member || !member.is_host) return jsonResponse({ error: 'Unauthorized: Only Team Lead can reopen a review round' }, 403);
+      const body = await request.json().catch(() => ({}));
+      let targetId = body.session_id;
+      if (!targetId) {
+        const closed = await env.DB.prepare("SELECT id FROM voting_sessions WHERE status = 'CLOSED' ORDER BY id DESC LIMIT 1").first();
+        targetId = closed?.id;
+      }
+      if (!targetId) return jsonResponse({ error: 'No closed review session found to reopen' }, 400);
+
+      await env.DB.prepare("UPDATE voting_sessions SET status = 'ARCHIVED' WHERE status = 'ACTIVE' AND id != ?").bind(targetId).run();
+      await env.DB.prepare("UPDATE voting_sessions SET status = 'ACTIVE', closed_at = NULL WHERE id = ?").bind(targetId).run();
+      await logAudit(env, member.handle, 'REOPEN_VOTING', 'voting', `Reopened review session #${targetId}`);
+      return jsonResponse({ success: true, session_id: targetId });
     }
 
     // --------------------------------------------------------------------------
@@ -950,7 +1050,7 @@ Be concise, authoritative, and grounded in the workspace data. Answer in plain t
             (slots.results || []).map(s => `• ${s.slot_name} (${s.slot_code})`).join('\n') +
             (groqDiagnostic ? `\n\n[Diagnostic Notice: ${groqDiagnostic}]` : '');
         } else {
-          modelReply = `I am Frontier Oracle running on Cloudflare Edge.\n\n⚠️ ${groqDiagnostic || 'Unable to connect to Groq AI service.'}\n\nYou have ${(tasks.results || []).length} sprint tasks active.`;
+          modelReply = `I am Frontier Oracle running on Cloudflare Edge.\n\n[Notice: ${groqDiagnostic || 'Unable to connect to Groq AI service.'}]\n\nYou have ${(tasks.results || []).length} sprint tasks active.`;
         }
       }
 
