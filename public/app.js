@@ -927,7 +927,7 @@ function renderGlobalHub() {
   const inProgress = state.tasks.filter(t => t.status === 'IN_PROGRESS').length;
   const todo = state.tasks.filter(t => t.status === 'TODO').length;
   const total = state.tasks.length;
-  const pct = Math.round((completed / total) * 100);
+  const pct = total > 0 ? Math.round((completed / total) * 100) : 0;
 
   const elComp = document.getElementById('global-team-completion');
   if (elComp) elComp.textContent = `${pct}%`;
