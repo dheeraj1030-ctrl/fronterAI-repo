@@ -134,7 +134,7 @@
           <button class="nav-item" data-view="view-voting">
             <svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 12 2 2 4-4"></path><path d="M5 7c0-1.1.9-2 2-2h10a2 2 0 0 1 2 2v12H5V7Z"></path><path d="M22 19H2"></path></svg>
             <span class="nav-label">Peer Review</span>
-            <span class="nav-badge" id="badge-voting-status">Active</span>
+            <span class="nav-badge" id="badge-voting-status" style="display: none;">Idle</span>
           </button>
           <button class="nav-item" id="nav-item-peers-settings" data-view="view-peers">
             <span id="nav-icon-peers-settings" style="display: inline-flex;"><svg class="nav-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg></span>
@@ -710,6 +710,7 @@
               <p class="view-subtitle">Intelligent project oracle with real-time workspace memory and task awareness</p>
             </div>
             <div class="header-action-group">
+              <button class="btn btn-outlined btn-sm" id="btn-oracle-clear-all" style="color: var(--text-muted);" title="Permanently delete all chat threads">Clear All</button>
               <button class="btn btn-outlined" id="btn-oracle-new-thread">+ New Chat</button>
             </div>
           </div>

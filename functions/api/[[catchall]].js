@@ -969,22 +969,32 @@ export async function onRequest(context) {
       // Record user message
       await env.DB.prepare("INSERT INTO ai_messages (thread_id, sender_role, content, created_at) VALUES (?, 'user', ?, datetime('now'))").bind(activeThreadId, message).run();
 
-      // Build Tier 1 context from D1
-      const tasks = await env.DB.prepare('SELECT title, track, status, deadline FROM tasks LIMIT 10').all();
-      const slots = await env.DB.prepare('SELECT slot_name, slot_code FROM meeting_slots LIMIT 6').all();
+      // Fetch conversation history for this thread (sliding window: last 6 turns)
+      const prevMsgs = await env.DB.prepare('SELECT sender_role, content FROM ai_messages WHERE thread_id = ? ORDER BY id DESC LIMIT 6').bind(activeThreadId).all();
+      const dialogueTurns = (prevMsgs.results || []).reverse();
+
+      // Build Tier 1 dynamic context from D1
+      const lower = message.toLowerCase();
+      let tasksContext = '';
+      if (/task|todo|progress|deliverable|deadline|work|sprint|status/.test(lower) || lower.length < 15) {
+        const tasks = await env.DB.prepare('SELECT title, track, status, deadline FROM tasks ORDER BY id ASC LIMIT 15').all();
+        tasksContext = '\nActive Sprint Tasks:\n' + (tasks.results || []).map(t => `- [${t.status}] ${t.title} (${t.track})${t.deadline ? ' due ' + t.deadline : ''}`).join('\n');
+      }
+
+      let calContext = '';
+      if (/meet|call|sync|calendar|slot|bridge|schedule|google|today|event/.test(lower) || lower.length < 15) {
+        const slots = await env.DB.prepare('SELECT slot_name, slot_code FROM meeting_slots LIMIT 6').all();
+        calContext = '\nMeeting Bridges:\n' + (slots.results || []).map(s => `- ${s.slot_name} (${s.slot_code})`).join('\n');
+      }
+
       let memory = null;
       try {
         memory = await env.DB.prepare('SELECT memory_data FROM member_memories WHERE member_id = ?').bind(memberId).first();
       } catch (e) {}
 
       const systemPrompt = `You are Frontier Oracle, the AI project assistant for the Frontier AI engineering workspace.
-Current User: ${member.name} (@${member.handle}) — ${member.role}
-User Memory: ${memory?.memory_data || '{}'}
-Active Sprint Tasks:
-${(tasks.results || []).map(t => `- [${t.status}] ${t.title} (${t.track})${t.deadline ? ' due ' + t.deadline : ''}`).join('\n')}
-Meeting Bridges:
-${(slots.results || []).map(s => `- ${s.slot_name} (${s.slot_code})`).join('\n')}
-Be concise, authoritative, and grounded in the workspace data. Answer in plain text without markdown.`;
+Current User: ${member.name} (@${member.handle}) — ${member.role}${memory?.memory_data ? '\nUser Profile: ' + memory.memory_data : ''}${tasksContext}${calContext}
+Be concise, authoritative, and strictly grounded in the workspace data. Answer clearly using plain text or brief markdown highlights.`;
 
       let modelReply = '';
       let groqDiagnostic = null;
@@ -994,13 +1004,24 @@ Be concise, authoritative, and grounded in the workspace data. Answer in plain t
       if (!groqKey) {
         groqDiagnostic = 'GROQ_API_KEY is not defined in Cloudflare Worker environment variables.';
       } else {
-        // Use active models available on user's Groq account
+        // Construct messages array with system prompt + sliding window of prior turns + current message
+        const llmMessages = [
+          { role: 'system', content: systemPrompt }
+        ];
+
+        for (const turn of dialogueTurns) {
+          // Map database sender_role ('user'|'model') to Groq ('user'|'assistant')
+          llmMessages.push({
+            role: turn.sender_role === 'model' ? 'assistant' : 'user',
+            content: turn.content
+          });
+        }
+
         const modelsToTry = [
-          'openai/gpt-oss-120b',
-          'openai/gpt-oss-20b',
-          'qwen/qwen3.8-27b',
           'llama-3.3-70b-versatile',
-          'llama-3.1-8b-instant'
+          'llama-3.1-8b-instant',
+          'openai/gpt-oss-120b',
+          'openai/gpt-oss-20b'
         ];
         for (const modelName of modelsToTry) {
           try {
@@ -1012,10 +1033,7 @@ Be concise, authoritative, and grounded in the workspace data. Answer in plain t
               },
               body: JSON.stringify({
                 model: modelName,
-                messages: [
-                  { role: 'system', content: systemPrompt },
-                  { role: 'user', content: message }
-                ],
+                messages: llmMessages,
                 max_tokens: 1024,
                 temperature: 0.3
               })
@@ -1040,22 +1058,24 @@ Be concise, authoritative, and grounded in the workspace data. Answer in plain t
 
       // Intelligent offline fallback
       if (!modelReply) {
-        const lower = message.toLowerCase();
         if (lower.includes('task') || lower.includes('todo') || lower.includes('sprint')) {
+          const tasks = await env.DB.prepare('SELECT title, track, status, deadline FROM tasks LIMIT 15').all();
           modelReply = `Active workspace tasks:\n` +
             (tasks.results || []).map(t => `• ${t.title} — ${t.status} (${t.track})`).join('\n') +
-            (groqDiagnostic ? `\n\n[Diagnostic Notice: ${groqDiagnostic}]` : '');
+            (groqDiagnostic ? `\n\n[Notice: ${groqDiagnostic}]` : '');
         } else if (lower.includes('meet') || lower.includes('call') || lower.includes('bridge')) {
+          const slots = await env.DB.prepare('SELECT slot_name, slot_code FROM meeting_slots LIMIT 6').all();
           modelReply = `Frontier AI has ${(slots.results || []).length} Google Meet bridges:\n` +
             (slots.results || []).map(s => `• ${s.slot_name} (${s.slot_code})`).join('\n') +
-            (groqDiagnostic ? `\n\n[Diagnostic Notice: ${groqDiagnostic}]` : '');
+            (groqDiagnostic ? `\n\n[Notice: ${groqDiagnostic}]` : '');
         } else {
-          modelReply = `I am Frontier Oracle running on Cloudflare Edge.\n\n[Notice: ${groqDiagnostic || 'Unable to connect to Groq AI service.'}]\n\nYou have ${(tasks.results || []).length} sprint tasks active.`;
+          modelReply = `I am Frontier Oracle running on Cloudflare Edge.\n\n[Notice: ${groqDiagnostic || 'Unable to connect to Groq AI service.'}]\n\nHow can I help you with current tasks or meetings?`;
         }
       }
 
       // Record model reply
       await env.DB.prepare("INSERT INTO ai_messages (thread_id, sender_role, content, created_at) VALUES (?, 'model', ?, datetime('now'))").bind(activeThreadId, modelReply).run();
+      await env.DB.prepare("UPDATE ai_threads SET updated_at = datetime('now') WHERE id = ?").bind(activeThreadId).run();
       return jsonResponse({ reply: modelReply, threadId: activeThreadId });
     }
 
@@ -1064,6 +1084,30 @@ Be concise, authoritative, and grounded in the workspace data. Answer in plain t
       if (!member) return jsonResponse({ error: 'Unauthorized' }, 401);
       const res = await env.DB.prepare('SELECT * FROM ai_threads WHERE member_id = ? ORDER BY id DESC').bind(member.id).all();
       return jsonResponse({ threads: res.results || [] });
+    }
+
+    // DELETE /api/ai/threads (Clear all threads for current user)
+    if (pathname === '/api/ai/threads' && method === 'DELETE') {
+      const member = await getAuthMember(request, env);
+      if (!member) return jsonResponse({ error: 'Unauthorized' }, 401);
+      await env.DB.prepare('DELETE FROM ai_messages WHERE thread_id IN (SELECT id FROM ai_threads WHERE member_id = ?)').bind(member.id).run();
+      await env.DB.prepare('DELETE FROM ai_threads WHERE member_id = ?').bind(member.id).run();
+      return jsonResponse({ success: true, message: 'All conversations cleared permanently.' });
+    }
+
+    // DELETE /api/ai/threads/:id (Delete single thread)
+    if (pathname.match(/^\/api\/ai\/threads\/\d+$/) && method === 'DELETE') {
+      const member = await getAuthMember(request, env);
+      if (!member) return jsonResponse({ error: 'Unauthorized' }, 401);
+      const threadId = parseInt(pathname.split('/')[4], 10);
+      const thread = await env.DB.prepare('SELECT * FROM ai_threads WHERE id = ?').bind(threadId).first();
+      if (!thread) return jsonResponse({ error: 'Thread not found' }, 404);
+      if (thread.member_id !== member.id && !member.is_host) {
+        return jsonResponse({ error: 'Forbidden' }, 403);
+      }
+      await env.DB.prepare('DELETE FROM ai_messages WHERE thread_id = ?').bind(threadId).run();
+      await env.DB.prepare('DELETE FROM ai_threads WHERE id = ?').bind(threadId).run();
+      return jsonResponse({ success: true, deletedThreadId: threadId });
     }
 
     if (pathname.match(/^\/api\/ai\/threads\/\d+\/messages$/) && method === 'GET') {

@@ -92,8 +92,20 @@ export async function handleAiRoutes(req, res, pathname, method) {
       return sendJson(res, 403, { error: 'Forbidden' });
     }
 
+    // Delete messages and thread
+    db.prepare('DELETE FROM ai_messages WHERE thread_id = ?').run(threadId);
     db.prepare('DELETE FROM ai_threads WHERE id = ?').run(threadId);
-    return sendJson(res, 200, { message: 'Thread deleted successfully' });
+    return sendJson(res, 200, { success: true, message: 'Thread deleted successfully' });
+  }
+
+  // 5. Delete all conversation threads for current user
+  if (pathname === '/api/ai/threads' && method === 'DELETE') {
+    const currentUser = getSessionUser(req);
+    if (!currentUser) return sendJson(res, 401, { error: 'Authentication required' });
+
+    db.prepare('DELETE FROM ai_messages WHERE thread_id IN (SELECT id FROM ai_threads WHERE member_id = ?)').run(currentUser.id);
+    db.prepare('DELETE FROM ai_threads WHERE member_id = ?').run(currentUser.id);
+    return sendJson(res, 200, { success: true, message: 'All conversation threads cleared.' });
   }
 
   return false;

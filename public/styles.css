@@ -3071,16 +3071,49 @@ body {
 }
 
 .oracle-thread-item {
-  padding: 9px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
   border-radius: 8px;
   margin-bottom: 4px;
   font-size: 12.5px;
   color: var(--text-secondary);
   cursor: pointer;
+  transition: all 0.15s ease;
+  position: relative;
+}
+
+.oracle-thread-title {
+  flex: 1;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  margin-right: 6px;
+}
+
+.oracle-thread-del-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 3px 5px;
+  border-radius: 4px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.7;
   transition: all 0.15s ease;
+}
+
+.oracle-thread-del-btn:hover {
+  background: rgba(234, 67, 53, 0.15);
+  color: var(--google-red);
+  opacity: 1;
+}
+
+.oracle-thread-item:hover .oracle-thread-del-btn {
+  display: inline-flex;
 }
 
 .oracle-thread-item:hover {
@@ -3093,6 +3126,10 @@ body {
   color: var(--google-blue);
   font-weight: 600;
   border: 1px solid rgba(168, 199, 250, 0.3);
+}
+
+.oracle-thread-item.active .oracle-thread-del-btn {
+  display: inline-flex;
 }
 
 .oracle-chat-main {
@@ -3892,6 +3929,22 @@ body {
   color: var(--text-secondary);
   margin: 0;
   line-height: 1.4;
+}
+
+#display-blind-token {
+  display: block;
+  max-width: 380px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono, monospace);
+  font-size: 11px;
+  background: rgba(0, 0, 0, 0.35);
+  border: 1px solid rgba(168, 199, 250, 0.25);
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: #a8c7fa;
+  margin-top: 6px;
 }
 
 .eval-submit-actions {

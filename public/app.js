@@ -1191,8 +1191,15 @@ function renderVotingSession() {
   const statusPill = document.getElementById('voting-status-pill');
   const subtitleEl = document.getElementById('voting-view-subtitle');
 
+  const navVotingBadge = document.getElementById('badge-voting-status');
+
   // Case 1: Idle state (No active session AND no closed session)
   if (!s || (!s.active && !s.hasClosedSession)) {
+    if (navVotingBadge) {
+      navVotingBadge.textContent = 'Idle';
+      navVotingBadge.className = 'nav-badge';
+      navVotingBadge.style.display = 'none';
+    }
     if (idleContainer) idleContainer.classList.remove('hidden');
     if (activeContainer) activeContainer.classList.add('hidden');
     if (closedContainer) closedContainer.classList.add('hidden');
@@ -1220,6 +1227,13 @@ function renderVotingSession() {
 
   // Case 2: Closed state (Has a closed session and no active session)
   if (!s.active && s.hasClosedSession && s.session) {
+    if (navVotingBadge) {
+      navVotingBadge.textContent = 'Closed';
+      navVotingBadge.className = 'nav-badge';
+      navVotingBadge.style.display = 'inline-block';
+      navVotingBadge.style.background = 'rgba(251, 188, 4, 0.15)';
+      navVotingBadge.style.color = '#fbbc04';
+    }
     if (idleContainer) idleContainer.classList.add('hidden');
     if (activeContainer) activeContainer.classList.add('hidden');
     if (closedContainer) closedContainer.classList.remove('hidden');
@@ -1241,14 +1255,11 @@ function renderVotingSession() {
     renderTallyMeters(s.tally || [], s.candidates || s.options || [], 'closed-tally-bars-display');
 
     if (openLaunchBtn) {
-      if (isHost) openLaunchBtn.classList.remove('hidden');
-      else openLaunchBtn.classList.add('hidden');
+      // In closed state, let the closed container banner own the action buttons to avoid duplicate triggers
+      openLaunchBtn.classList.add('hidden');
     }
     if (closeVoteBtn) closeVoteBtn.classList.add('hidden');
-    if (reopenVoteBtn) {
-      if (isHost) reopenVoteBtn.classList.remove('hidden');
-      else reopenVoteBtn.classList.add('hidden');
-    }
+    if (reopenVoteBtn) reopenVoteBtn.classList.add('hidden');
     if (closedNewRoundBtn) {
       if (isHost) closedNewRoundBtn.classList.remove('hidden');
       else closedNewRoundBtn.classList.add('hidden');
@@ -1261,6 +1272,13 @@ function renderVotingSession() {
   }
 
   // Case 3: Active state
+  if (navVotingBadge) {
+    navVotingBadge.textContent = 'Active';
+    navVotingBadge.className = 'nav-badge';
+    navVotingBadge.style.display = 'inline-block';
+    navVotingBadge.style.background = 'rgba(52, 168, 83, 0.15)';
+    navVotingBadge.style.color = '#81c995';
+  }
   if (idleContainer) idleContainer.classList.add('hidden');
   if (closedContainer) closedContainer.classList.add('hidden');
   if (activeContainer) activeContainer.classList.remove('hidden');
@@ -1342,15 +1360,19 @@ function renderVotingSession() {
 
   // Populate candidate options dynamically as cards
   const choicesContainer = document.getElementById('ballot-options-container');
+  const submitBtn = document.getElementById('btn-submit-evaluation');
   if (choicesContainer) {
     choicesContainer.innerHTML = '';
     const candidatesList = s.candidates || s.options || [];
 
     let hasSelected = false;
+    let evaluableCount = 0;
 
     candidatesList.forEach((cand, idx) => {
       const candId = cand.id || cand.candidate_member_id;
       const isSelf = (!isQualityType && state.currentUser && state.currentUser.id === candId);
+      if (!isSelf) evaluableCount++;
+
       const candName = cand.name || cand.candidate_name || cand.label || (isQualityType ? 'Project Track' : 'Engineer');
       const candRole = cand.role || cand.candidate_role || (isQualityType ? 'Milestone Pillar' : 'Developer');
       const candTrack = cand.team_track || (isQualityType ? 'milestone' : 'general');
@@ -1395,6 +1417,22 @@ function renderVotingSession() {
 
       choicesContainer.appendChild(card);
     });
+
+    if (evaluableCount === 0 && !isQualityType) {
+      const emptyNote = document.createElement('div');
+      emptyNote.style.cssText = 'grid-column: 1 / -1; padding: 14px 18px; border-radius: 8px; background: rgba(255,255,255,0.03); border: 1px dashed var(--border-default); color: var(--text-secondary); font-size: 13px; text-align: center; margin-top: 8px;';
+      emptyNote.textContent = 'You are the only member registered in this workspace. Teammates must join before you can submit peer evaluations for them.';
+      choicesContainer.appendChild(emptyNote);
+      if (submitBtn) {
+        submitBtn.disabled = true;
+        submitBtn.title = 'No other teammates available to evaluate';
+      }
+    } else {
+      if (submitBtn) {
+        submitBtn.disabled = false;
+        submitBtn.title = '';
+      }
+    }
   }
 
   // Render Live Leaderboard Standings
@@ -1890,13 +1928,14 @@ async function renderMeetingBridges() {
       const card = document.createElement('div');
       card.className = 'bridge-slot-card';
       const lastUsed = slot.last_used_at ? new Date(slot.last_used_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Ready';
+      const isSlotLive = state.calendarEvents?.some(e => e.is_live && e.meeting_slot_id === slot.id);
       card.innerHTML = `
         <div class="bridge-slot-top">
-          <span class="bridge-slot-code">${slot.slot_code}</span>
-          <span class="bridge-status-dot" title="Available"></span>
+          <span class="bridge-slot-code">${escapeHtml(slot.slot_code)}</span>
+          <span class="bridge-status-dot ${isSlotLive ? 'pulse-green' : ''}" title="${isSlotLive ? 'Call in progress' : 'Available'}"></span>
         </div>
-        <div class="bridge-slot-name">${slot.slot_name}</div>
-        <div class="bridge-slot-meta">Status: Active · ${slot.last_used_at ? `Used at ${lastUsed}` : 'Unused slot'}</div>
+        <div class="bridge-slot-name">${escapeHtml(slot.slot_name)}</div>
+        <div class="bridge-slot-meta">Status: ${isSlotLive ? 'In Use' : 'Ready'} · ${slot.last_used_at ? `Used at ${lastUsed}` : 'Unused slot'}</div>
       `;
       container.appendChild(card);
     });
@@ -3648,14 +3687,53 @@ function renderOracleThreadsList() {
 
   container.innerHTML = state.oracleThreads.map(t => `
     <div class="oracle-thread-item ${t.id === state.currentOracleThreadId ? 'active' : ''}" data-thread-id="${t.id}" title="${escapeHtml(t.title)}">
-      ${escapeHtml(t.title)}
+      <span class="oracle-thread-title">${escapeHtml(t.title)}</span>
+      <button type="button" class="oracle-thread-del-btn" data-thread-id="${t.id}" title="Delete thread" aria-label="Delete thread">
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+      </button>
     </div>
   `).join('');
 
   container.querySelectorAll('.oracle-thread-item').forEach(el => {
-    el.addEventListener('click', () => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.oracle-thread-del-btn')) return;
       const threadId = parseInt(el.dataset.threadId, 10);
       loadOracleThreadMessages(threadId);
+    });
+  });
+
+  container.querySelectorAll('.oracle-thread-del-btn').forEach(btn => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const threadId = parseInt(btn.dataset.threadId, 10);
+      if (!confirm('Permanently delete this conversation thread?')) return;
+      try {
+        const res = await fetch(`/api/ai/threads/${threadId}`, { method: 'DELETE' });
+        if (res.ok) {
+          showToast('Conversation thread deleted.');
+          if (state.currentOracleThreadId === threadId) {
+            state.currentOracleThreadId = null;
+            const msgBox = document.getElementById('oracle-messages-box');
+            if (msgBox) {
+              msgBox.innerHTML = `
+                <div class="oracle-bubble oracle-bubble-model">
+                  <div class="oracle-bubble-avatar">
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>
+                  </div>
+                  <div class="oracle-bubble-content">
+                    <p>Thread deleted. Started a new conversation.</p>
+                  </div>
+                </div>
+              `;
+            }
+          }
+          await loadOracleThreads();
+        } else {
+          showToast('Failed to delete thread', true);
+        }
+      } catch (err) {
+        showToast('Error deleting conversation', true);
+      }
     });
   });
 }
@@ -3805,6 +3883,42 @@ function setupOracleListeners() {
       const prompt = chip.dataset.prompt;
       if (prompt) sendOracleMessage(prompt);
     });
+  });
+
+  // Clear All Chats button
+  document.getElementById('btn-oracle-clear-all')?.addEventListener('click', async () => {
+    if (!state.oracleThreads || state.oracleThreads.length === 0) {
+      showToast('No conversations to clear');
+      return;
+    }
+    if (!confirm('Permanently delete all your conversation history with Frontier Oracle? This cannot be undone.')) return;
+    try {
+      const res = await fetch('/api/ai/threads', { method: 'DELETE' });
+      if (res.ok) {
+        showToast('All conversations cleared.');
+        state.currentOracleThreadId = null;
+        state.oracleThreads = [];
+        renderOracleThreadsList();
+        const msgBox = document.getElementById('oracle-messages-box');
+        if (msgBox) {
+          msgBox.innerHTML = `
+            <div class="oracle-bubble oracle-bubble-model">
+              <div class="oracle-bubble-avatar">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>
+              </div>
+              <div class="oracle-bubble-content">
+                <p>All conversations cleared.</p>
+                <p>Ask anything about current sprint tasks, deadlines, meeting slots, or team assignments.</p>
+              </div>
+            </div>
+          `;
+        }
+      } else {
+        showToast('Failed to clear conversations', true);
+      }
+    } catch (e) {
+      showToast('Error clearing chat history', true);
+    }
   });
 
   // New Chat button
