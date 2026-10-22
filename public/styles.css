@@ -1771,9 +1771,11 @@ body {
   border-radius: 16px;
   padding: 0;
   margin: auto;
-  max-width: 540px;
+  max-width: 560px;
   width: 90%;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, 0.7);
+  outline: none;
+  overflow: hidden;
 }
 
 .modal-large {
@@ -1782,10 +1784,13 @@ body {
 
 .workspace-dialog::backdrop {
   background-color: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(2px);
 }
 
 .dialog-box {
   padding: 24px 28px;
+  max-height: 85vh;
+  overflow-y: auto;
 }
 
 .dialog-header {
@@ -1822,8 +1827,23 @@ body {
 }
 
 .btn-close-modal {
-  font-size: 20px;
+  font-size: 22px;
+  line-height: 1;
   color: var(--text-muted);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s ease;
+}
+
+.btn-close-modal:hover {
+  background: var(--bg-surface-elevated);
+  color: var(--text-primary);
 }
 
 .dialog-form {
@@ -1832,14 +1852,16 @@ body {
   gap: 16px;
 }
 
-.form-field {
+.form-field,
+.form-group {
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 
-.form-field label {
-  font-size: 12px;
+.form-field label,
+.form-group label {
+  font-size: 12.5px;
   font-weight: 600;
   color: var(--text-secondary);
 }
@@ -1852,23 +1874,30 @@ body {
 
 .input-text,
 .input-select,
-.input-textarea {
+.input-textarea,
+.form-input,
+.form-select,
+.form-textarea {
   background-color: var(--bg-canvas);
   border: 1px solid var(--border-default);
   color: var(--text-primary);
   font-family: var(--font-sans);
   font-size: 13.5px;
-  padding: 8px 12px;
+  padding: 10px 14px;
   border-radius: 8px;
   outline: none;
   width: 100%;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .input-text:focus,
 .input-select:focus,
-.input-textarea:focus {
+.input-textarea:focus,
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
   border-color: var(--google-blue);
-  box-shadow: 0 0 0 2px rgba(168, 199, 250, 0.15);
+  box-shadow: 0 0 0 2px rgba(168, 199, 250, 0.2);
 }
 
 .dialog-actions {

@@ -1735,16 +1735,37 @@ function initLaunchVotingModal() {
   ];
 
   openBtns.forEach(btn => {
-    btn?.addEventListener('click', () => {
-      if (modal) modal.showModal();
+    btn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (modal && !modal.open) {
+        modal.showModal();
+      }
     });
   });
 
-  document.getElementById('btn-close-launch-voting')?.addEventListener('click', () => {
+  document.getElementById('btn-close-launch-voting')?.addEventListener('click', (e) => {
+    e.preventDefault();
     modal?.close();
   });
-  document.getElementById('btn-cancel-launch-voting')?.addEventListener('click', () => {
+  document.getElementById('btn-cancel-launch-voting')?.addEventListener('click', (e) => {
+    e.preventDefault();
     modal?.close();
+  });
+
+  modal?.addEventListener('click', (e) => {
+    if (e.target === modal) {
+      modal.close();
+    }
+  });
+
+  // Global safety: close any workspace-dialog when clicking outside
+  document.querySelectorAll('dialog.workspace-dialog').forEach(dlg => {
+    dlg.addEventListener('click', (e) => {
+      if (e.target === dlg) {
+        dlg.close();
+      }
+    });
   });
 
   if (typeSelect) {
