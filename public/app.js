@@ -1175,197 +1175,272 @@ function renderVotingSession() {
   const s = state.votingSession;
   if (!s || !s.session) return;
 
-  document.getElementById('voting-session-headline').textContent = s.session.title;
-  document.getElementById('voting-session-summary').textContent = s.session.description;
+  const headlineEl = document.getElementById('voting-session-headline');
+  if (headlineEl) headlineEl.textContent = s.session.title || 'Sprint 1 Evaluation Round';
 
   const ballots = s.totalBallots || 0;
   const eligible = s.totalEligible || s.candidates?.length || 8;
   const pct = Math.min(100, Math.round((ballots / eligible) * 100));
 
+  // Circular Chart & Stats
   const ballotsCountEl = document.getElementById('stats-ballots-count');
   const ballotsTotalEl = document.getElementById('stats-ballots-total');
   const ballotsBarEl = document.getElementById('stats-ballots-bar');
+  const circleFillEl = document.getElementById('participation-circle-fill');
+  const circlePctEl = document.getElementById('stats-participation-pct');
+  const partPillEl = document.getElementById('participation-status-pill');
 
   if (ballotsCountEl) ballotsCountEl.textContent = ballots;
-  if (ballotsTotalEl) ballotsTotalEl.textContent = `/ ${eligible} Evaluated`;
+  if (ballotsTotalEl) ballotsTotalEl.textContent = `/ ${eligible}`;
   if (ballotsBarEl) ballotsBarEl.style.width = `${pct}%`;
+  if (circleFillEl) circleFillEl.setAttribute('stroke-dasharray', `${pct}, 100`);
+  if (circlePctEl) circlePctEl.textContent = `${pct}%`;
 
   const memberName = state.currentUser ? state.currentUser.name : 'Unknown';
-  document.getElementById('stepper-member-label').textContent = memberName;
+  const memberLabel = document.getElementById('stepper-member-label');
+  if (memberLabel) memberLabel.textContent = memberName;
 
+  const step1 = document.getElementById('step-node-1');
   const step2 = document.getElementById('step-node-2');
   const step3 = document.getElementById('step-node-3');
   const step4 = document.getElementById('step-node-4');
 
-  const claimBox = document.getElementById('voting-claim-box');
-  const castBox = document.getElementById('voting-cast-box');
+  const evalForm = document.getElementById('form-submit-ballot');
   const completedBox = document.getElementById('voting-completed-box');
-  const tallyBox = document.getElementById('tally-results-container');
   const closeVoteBtn = document.getElementById('btn-host-close-voting');
   const reopenVoteBtn = document.getElementById('btn-host-reopen-voting');
+  const statusPill = document.getElementById('voting-status-pill');
 
   const isClosed = s.session.status === 'CLOSED';
   const isHost = state.currentUser && !!state.currentUser.is_host;
 
-  if (isClosed || (s.isRevealed && s.tally)) {
-    // Session is closed or threshold met: show results, hide active voting boxes
-    step4.className = 'step-node completed';
-    document.getElementById('step-line-3').className = 'stepper-line completed';
-    tallyBox.classList.remove('hidden');
-    renderTallyMeters(s.tally || []);
-
-    claimBox.classList.add('hidden');
-    castBox.classList.add('hidden');
-    completedBox.classList.add('hidden');
-
-    const statusPill = document.getElementById('voting-status-pill');
+  if (isClosed) {
+    if (step4) step4.className = 'vstep-item completed';
     if (statusPill) {
-      statusPill.textContent = 'SESSION CLOSED';
+      statusPill.innerHTML = '<span class="pulse-dot" style="background:#fbbc04; width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px;"></span>Session Closed';
       statusPill.className = 'status-pill pill-amber';
     }
-
+    if (partPillEl) partPillEl.textContent = 'Session Closed (Standings Revealed)';
     if (isHost) {
       if (closeVoteBtn) closeVoteBtn.classList.add('hidden');
       if (reopenVoteBtn) reopenVoteBtn.classList.remove('hidden');
     }
   } else {
-    // Active session
-    step4.className = 'step-node';
-    tallyBox.classList.add('hidden');
-
-    const statusPill = document.getElementById('voting-status-pill');
+    if (step4) step4.className = 'vstep-item';
     if (statusPill) {
-      statusPill.textContent = 'ACTIVE ROUND';
+      statusPill.innerHTML = '<span class="pulse-dot" style="background:#34a853; width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px;"></span>Active Round';
       statusPill.className = 'status-pill pill-green';
     }
-
+    if (partPillEl) partPillEl.textContent = ballots >= eligible ? 'All Teammates Evaluated' : 'Active Round in Progress';
     if (isHost) {
       if (closeVoteBtn) closeVoteBtn.classList.remove('hidden');
       if (reopenVoteBtn) reopenVoteBtn.classList.add('hidden');
     }
-
-    if (s.userHasClaimedToken) {
-      step2.className = 'step-node completed';
-      document.getElementById('step-line-2').className = 'stepper-line completed';
-      claimBox.classList.add('hidden');
-
-      if (state.unlinkedBallotToken) {
-        step3.className = 'step-node active';
-        castBox.classList.remove('hidden');
-        completedBox.classList.add('hidden');
-        document.getElementById('display-blind-token').textContent = state.unlinkedBallotToken;
-      } else {
-        step3.className = 'step-node completed';
-        castBox.classList.add('hidden');
-        completedBox.classList.remove('hidden');
-      }
-    } else {
-      step2.className = 'step-node active';
-      document.getElementById('step-line-2').className = 'stepper-line';
-      step3.className = 'step-node';
-      claimBox.classList.remove('hidden');
-      castBox.classList.add('hidden');
-      completedBox.classList.add('hidden');
-    }
   }
 
-  // Populate candidate options dynamically
-  const choicesContainer = document.getElementById('ballot-options-container');
-  choicesContainer.innerHTML = '';
-  const candidatesList = s.candidates || s.options || [];
+  // Token shield state
+  const tokenShieldText = document.getElementById('crypto-token-status-text');
+  const blindTokenCode = document.getElementById('display-blind-token');
+  const stepperTokenLabel = document.getElementById('stepper-token-label');
 
-  candidatesList.forEach((cand, idx) => {
-    const isSelf = state.currentUser && (state.currentUser.id === cand.id || state.currentUser.id === cand.candidate_member_id);
-    const label = document.createElement('label');
-    label.className = 'choice-card-label' + (isSelf ? ' disabled-choice' : '');
-    if (isSelf) {
-      label.style.opacity = '0.5';
-      label.style.cursor = 'not-allowed';
+  if (state.unlinkedBallotToken) {
+    if (step2) step2.className = 'vstep-item completed';
+    if (stepperTokenLabel) stepperTokenLabel.textContent = 'Decoupled Token Active';
+    if (tokenShieldText) tokenShieldText.textContent = `HMAC Token Active: ${state.unlinkedBallotToken.slice(0, 10)}... (zero identity linkage in ballot box).`;
+    if (blindTokenCode) {
+      blindTokenCode.textContent = state.unlinkedBallotToken;
+      blindTokenCode.style.display = 'inline-block';
     }
-    const val = cand.id || cand.candidate_member_id;
-    label.innerHTML = `
-      <input type="radio" name="ballot-choice-opt" value="${val}" ${idx === 0 && !isSelf ? 'checked' : ''} ${isSelf ? 'disabled' : ''}>
-      <div style="flex: 1;">
-        <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span class="choice-text"><strong>${cand.name || cand.candidate_name || cand.label}</strong></span>
-          ${isSelf ? '<span style="font-size: 11px; color: var(--text-muted);">(You - cannot self-evaluate)</span>' : ''}
-        </div>
-        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">${cand.role || cand.candidate_role || 'Engineer'} · Track: ${cand.team_track || 'General'}</div>
-      </div>
-    `;
-    choicesContainer.appendChild(label);
-  });
+  } else {
+    if (step2) step2.className = 'vstep-item active';
+    if (stepperTokenLabel) stepperTokenLabel.textContent = 'Auto-signed on submit';
+    if (tokenShieldText) tokenShieldText.textContent = 'A decoupled blind cryptographic token will be automatically requested and burned on submit.';
+    if (blindTokenCode) blindTokenCode.style.display = 'none';
+  }
 
+  // Populate candidate options dynamically as cards
+  const choicesContainer = document.getElementById('ballot-options-container');
+  if (choicesContainer) {
+    choicesContainer.innerHTML = '';
+    const candidatesList = s.candidates || s.options || [];
+
+    let hasSelected = false;
+
+    candidatesList.forEach((cand, idx) => {
+      const candId = cand.id || cand.candidate_member_id;
+      const isSelf = state.currentUser && (state.currentUser.id === candId);
+      const candName = cand.name || cand.candidate_name || cand.label || 'Engineer';
+      const candRole = cand.role || cand.candidate_role || 'Developer';
+      const candTrack = cand.team_track || 'general';
+      const initials = candName.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase() || 'TM';
+
+      const card = document.createElement('div');
+      const isDefaultSelected = !isSelf && !hasSelected;
+      if (isDefaultSelected) hasSelected = true;
+
+      card.className = `candidate-card-btn ${isSelf ? 'disabled' : ''} ${isDefaultSelected ? 'selected' : ''}`;
+      card.dataset.candidateId = candId;
+      card.dataset.candidateName = candName;
+      card.setAttribute('role', 'radio');
+      card.setAttribute('aria-checked', isDefaultSelected ? 'true' : 'false');
+
+      card.innerHTML = `
+        <div class="cand-avatar">${initials}</div>
+        <div class="cand-info">
+          <div class="cand-name-row">
+            <span class="cand-name">${escapeHtml(candName)}</span>
+            ${isSelf ? '<span class="cand-badge-self">You (Self-eval excluded)</span>' : ''}
+          </div>
+          <div class="cand-sub">${escapeHtml(candRole)} · Track: ${escapeHtml(candTrack.toUpperCase())}</div>
+        </div>
+        <div class="cand-check-circle">${isDefaultSelected ? '✓' : ''}</div>
+      `;
+
+      if (!isSelf) {
+        card.addEventListener('click', () => {
+          choicesContainer.querySelectorAll('.candidate-card-btn').forEach(c => {
+            c.classList.remove('selected');
+            c.setAttribute('aria-checked', 'false');
+            const check = c.querySelector('.cand-check-circle');
+            if (check) check.textContent = '';
+          });
+          card.classList.add('selected');
+          card.setAttribute('aria-checked', 'true');
+          const check = card.querySelector('.cand-check-circle');
+          if (check) check.textContent = '✓';
+        });
+      }
+
+      choicesContainer.appendChild(card);
+    });
+  }
+
+  // Render Live Leaderboard Standings
+  renderTallyMeters(s.tally || [], s.candidates || s.options || []);
+
+  // Initialize star rating showcase
   initStarRatingSelector();
 }
 
 function initStarRatingSelector() {
-  const ratingButtons = document.querySelectorAll('.rating-star-btn');
+  const starButtons = document.querySelectorAll('#star-rating-selector .star-btn');
   const hiddenInput = document.getElementById('selected-ballot-rating');
   const label = document.getElementById('rating-score-label');
-  const descMap = {
-    1: '1 / 5 ★ (Needs Improvement)',
-    2: '2 / 5 ★ (Fair)',
-    3: '3 / 5 ★ (Good)',
-    4: '4 / 5 ★ (Very Good)',
-    5: '5 / 5 ★ (Outstanding)'
+  const explainer = document.getElementById('rating-score-explainer');
+
+  const ratingMetadata = {
+    1: { label: '1 / 5 ★ (Needs Significant Improvement)', text: 'Critical sprint milestones missed; low communication or frequent blocking issues.' },
+    2: { label: '2 / 5 ★ (Fair Progress)', text: 'Met basic sprint tasks with substantial assistance; opportunity to grow autonomy.' },
+    3: { label: '3 / 5 ★ (Good & Reliable)', text: 'Dependably delivered sprint deliverables on schedule with solid engineering quality.' },
+    4: { label: '4 / 5 ★ (Very Good Impact)', text: 'High velocity, proactive PR reviews, and consistently assisted peers with roadblocks.' },
+    5: { label: '5 / 5 ★ (Outstanding Impact)', text: 'Exceptional sprint velocity, architecture leadership, and proactive peer support.' }
   };
 
-  ratingButtons.forEach(btn => {
-    btn.onclick = () => {
-      const rating = parseInt(btn.dataset.rating, 10);
-      if (hiddenInput) hiddenInput.value = rating;
-      if (label) label.textContent = descMap[rating] || `${rating} / 5 ★`;
+  function updateVisuals(rating) {
+    starButtons.forEach(b => {
+      const bRating = parseInt(b.dataset.rating, 10);
+      if (bRating <= rating) {
+        b.classList.add('active');
+      } else {
+        b.classList.remove('active');
+      }
+    });
+  }
 
-      ratingButtons.forEach(b => {
-        const bRating = parseInt(b.dataset.rating, 10);
-        if (bRating <= rating) {
-          b.classList.add('active');
-          b.style.borderColor = 'var(--google-blue)';
-          b.style.background = 'rgba(66,133,244,0.15)';
-          b.style.color = '#fbbc04';
-        } else {
-          b.classList.remove('active');
-          b.style.borderColor = 'var(--border-default)';
-          b.style.background = 'var(--bg-surface)';
-          b.style.color = 'var(--text-primary)';
-        }
-      });
+  starButtons.forEach(btn => {
+    const rating = parseInt(btn.dataset.rating, 10);
+
+    btn.addEventListener('mouseenter', () => {
+      updateVisuals(rating);
+      if (label && ratingMetadata[rating]) label.textContent = ratingMetadata[rating].label;
+      if (explainer && ratingMetadata[rating]) explainer.textContent = ratingMetadata[rating].text;
+    });
+
+    btn.addEventListener('mouseleave', () => {
+      const currentVal = hiddenInput ? parseInt(hiddenInput.value, 10) : 5;
+      updateVisuals(currentVal);
+      if (label && ratingMetadata[currentVal]) label.textContent = ratingMetadata[currentVal].label;
+      if (explainer && ratingMetadata[currentVal]) explainer.textContent = ratingMetadata[currentVal].text;
+    });
+
+    btn.addEventListener('click', () => {
+      if (hiddenInput) hiddenInput.value = rating;
+      updateVisuals(rating);
+      if (label && ratingMetadata[rating]) label.textContent = ratingMetadata[rating].label;
+      if (explainer && ratingMetadata[rating]) explainer.textContent = ratingMetadata[rating].text;
+    });
+  });
+
+  // Praise chips toggle
+  document.querySelectorAll('#voting-praise-chips .praise-chip').forEach(chip => {
+    chip.onclick = () => {
+      chip.classList.toggle('active');
     };
   });
 }
 
-function renderTallyMeters(tally) {
+function renderTallyMeters(tally, candidatesList = []) {
   const container = document.getElementById('tally-bars-display');
+  if (!container) return;
   container.innerHTML = '';
 
-  if (!tally || tally.length === 0) {
-    container.innerHTML = '<p style="color: var(--text-muted); font-size: 13px;">No evaluation ratings recorded yet.</p>';
-    return;
-  }
+  // Merge tally with all candidates so every candidate appears on the standings board
+  const candMap = new Map();
+  candidatesList.forEach(c => {
+    const id = c.id || c.candidate_member_id;
+    candMap.set(id, {
+      id,
+      candidate_name: c.name || c.candidate_name || c.label,
+      candidate_role: c.role || c.candidate_role || 'Engineer',
+      avg_rating: 0,
+      total_ratings: 0
+    });
+  });
 
-  tally.forEach(item => {
+  (tally || []).forEach(item => {
+    const id = item.candidate_id || item.id;
+    if (id && candMap.has(id)) {
+      candMap.set(id, { ...candMap.get(id), ...item });
+    } else {
+      candMap.set(id || Math.random(), item);
+    }
+  });
+
+  const list = Array.from(candMap.values());
+  list.sort((a, b) => {
+    const scoreA = (a.avg_rating || 0) * (a.total_ratings || a.votes || 0);
+    const scoreB = (b.avg_rating || 0) * (b.total_ratings || b.votes || 0);
+    if (scoreB !== scoreA) return scoreB - scoreA;
+    return (b.avg_rating || 0) - (a.avg_rating || 0);
+  });
+
+  const medals = ['🥇', '🥈', '🥉'];
+
+  list.forEach((item, idx) => {
     const avgScore = item.avg_rating || 0;
     const count = item.total_ratings || item.votes || 0;
     const scorePct = Math.round((avgScore / 5) * 100);
+    const medal = idx < 3 ? medals[idx] : `<span style="font-size: 11px; color: var(--text-muted); font-weight:700;">#${idx + 1}</span>`;
 
     const card = document.createElement('div');
-    card.className = 'tally-card';
-    card.style = 'background: var(--bg-surface-elevated); padding: 12px 14px; border-radius: 8px; margin-bottom: 12px; border: 1px solid var(--border-subtle);';
-
+    card.className = 'standings-rank-card';
     card.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
-        <div>
-          <span style="font-weight: 700; font-size: 14px;">${item.candidate_name || item.label}</span>
-          <span style="font-size: 12px; color: var(--text-secondary); margin-left: 8px;">${item.candidate_role || ''}</span>
-        </div>
-        <div style="display: flex; align-items: center; gap: 6px;">
-          <span style="font-size: 16px; color: #fbbc04; font-weight: 700;">★ ${avgScore > 0 ? avgScore.toFixed(1) : '—'}</span>
-          <span style="font-size: 12px; color: var(--text-muted);">/ 5.0 (${count} ${count === 1 ? 'review' : 'reviews'})</span>
+      <div class="rank-card-left">
+        <div class="rank-medal">${medal}</div>
+        <div style="min-width: 0;">
+          <div class="rank-cand-name">${escapeHtml(item.candidate_name || item.label || 'Teammate')}</div>
+          <div class="rank-cand-role">${escapeHtml(item.candidate_role || 'Engineering Member')}</div>
+          <div style="height: 4px; border-radius: 2px; background: rgba(255,255,255,0.08); width: 110px; margin-top: 4px; overflow: hidden;">
+            <div style="width: ${scorePct}%; height: 100%; background: ${avgScore >= 4.5 ? '#fbbc04' : avgScore >= 3.5 ? '#34a853' : '#4285f4'}; transition: width 0.4s ease;"></div>
+          </div>
         </div>
       </div>
-      <div class="tally-meter-track" style="height: 8px; border-radius: 4px; background: var(--border-default); overflow: hidden;">
-        <div class="tally-meter-fill" style="width: ${scorePct}%; height: 100%; background: linear-gradient(90deg, #4285F4, #34A853); transition: width 0.4s ease;"></div>
+      <div class="rank-card-right">
+        <div class="rank-score-pill">
+          <span>★</span>
+          <span>${avgScore > 0 ? avgScore.toFixed(1) : '—'}</span>
+        </div>
+        <div class="rank-review-count">${count} ${count === 1 ? 'evaluation' : 'evaluations'}</div>
       </div>
     `;
     container.appendChild(card);
@@ -1399,14 +1474,39 @@ async function claimBlindToken() {
 
 async function castAnonymousBallot(e) {
   e.preventDefault();
-  const selected = document.querySelector('input[name="ballot-choice-opt"]:checked');
-  if (!selected) return showToast('Please select a team member to evaluate', true);
 
-  const sessionId = state.currentVotingSessionId || 1;
-  const candidateId = parseInt(selected.value, 10);
+  const selected = document.querySelector('#ballot-options-container .candidate-card-btn.selected');
+  if (!selected) {
+    return showToast('Please select a teammate to evaluate', true);
+  }
+
+  const candidateId = parseInt(selected.dataset.candidateId, 10);
   const ratingInput = document.getElementById('selected-ballot-rating');
   const rating = ratingInput ? parseInt(ratingInput.value, 10) : 5;
-  const token = state.unlinkedBallotToken;
+  const sessionId = state.currentVotingSessionId || 1;
+
+  // Auto-acquire token seamlessly if user doesn't have one yet
+  let token = state.unlinkedBallotToken;
+  if (!token) {
+    try {
+      const tokenRes = await fetch('/api/voting/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ session_id: sessionId })
+      });
+      const tokenData = await tokenRes.json();
+      if (!tokenRes.ok) {
+        showToast(tokenData.error || 'Unable to generate cryptographic ballot token', true);
+        return;
+      }
+      token = tokenData.token;
+      state.unlinkedBallotToken = token;
+      sessionStorage.setItem('ballot_token_' + sessionId, token);
+    } catch (err) {
+      showToast('Network error securing anonymous token', true);
+      return;
+    }
+  }
 
   try {
     const res = await fetch('/api/voting/cast', {
@@ -1424,7 +1524,15 @@ async function castAnonymousBallot(e) {
 
     state.unlinkedBallotToken = null;
     sessionStorage.removeItem('ballot_token_' + sessionId);
-    showToast(`Anonymous evaluation of ${rating}/5 stars successfully recorded!`);
+
+    // Show success card
+    const evalForm = document.getElementById('form-submit-ballot');
+    const completedBox = document.getElementById('voting-completed-box');
+    if (evalForm) evalForm.classList.add('hidden');
+    if (completedBox) completedBox.classList.remove('hidden');
+
+    const candName = selected.dataset.candidateName || 'Teammate';
+    showToast(`Anonymous evaluation of ${rating}/5 ★ for ${candName} recorded!`);
     await loadVotingSession();
     await loadPersonalDashboard();
   } catch (err) {
@@ -2723,6 +2831,7 @@ function setupCommandPalette() {
   const modal = document.getElementById('modal-command-palette');
   const input = document.getElementById('palette-search-input');
   const resultsContainer = document.getElementById('palette-results-list');
+  const escBtn = document.getElementById('btn-close-palette-esc');
 
   if (!modal || !input || !resultsContainer) return;
 
@@ -2731,14 +2840,24 @@ function setupCommandPalette() {
 
   openCommandPalette = (initialQuery = '') => {
     input.value = initialQuery;
-    modal.showModal();
+    try {
+      if (!modal.open) modal.showModal();
+    } catch (err) {
+      modal.setAttribute('open', '');
+    }
     renderResults(initialQuery);
     setTimeout(() => input.focus(), 50);
   };
 
   const closePalette = () => {
-    modal.close();
+    try {
+      if (modal.open) modal.close();
+    } catch (err) {
+      modal.removeAttribute('open');
+    }
   };
+
+  escBtn?.addEventListener('click', closePalette);
 
   // Keyboard shortcut: Ctrl+K or Cmd+K toggles palette
   document.addEventListener('keydown', (e) => {
@@ -2752,20 +2871,26 @@ function setupCommandPalette() {
     }
   });
 
+  // Clicking backdrop closes palette
   modal.addEventListener('click', (e) => {
-    if (e.target === modal) closePalette();
+    const rect = modal.getBoundingClientRect();
+    const isInDialog = (
+      rect.top <= e.clientY && e.clientY <= rect.top + rect.height &&
+      rect.left <= e.clientX && e.clientX <= rect.left + rect.width
+    );
+    if (!isInDialog) closePalette();
   });
 
   const baseCommands = [
-    { type: 'command', icon: '📋', title: '/tasks', desc: 'Jump to Kanban Sprint Board', action: () => { switchView('view-tasks'); document.getElementById('tab-tasks-all')?.click(); } },
-    { type: 'command', icon: '👤', title: '/mine', desc: 'Jump to Assigned to Me (Personal Checklist)', action: () => { switchView('view-tasks'); document.getElementById('tab-tasks-mine')?.click(); } },
-    { type: 'command', icon: '📞', title: '/call', desc: 'Open Google Meet Call Room', action: () => switchView('view-callroom') },
-    { type: 'command', icon: '⭐', title: '/vote', desc: 'Jump to 1–5 Star Anonymous Peer Review', action: () => switchView('view-voting') },
-    { type: 'command', icon: '🤝', title: '/peers', desc: 'Open Multipurpose Peers & Feedback Hub', action: () => switchView('view-peers') },
-    { type: 'command', icon: '🛡️', title: '/signoff', desc: 'Sprint Deliverable Sign-Off & Approvals', action: () => { switchView('view-settings'); document.querySelector('#settings-subtabs [data-subtab="permissions"]')?.click(); } },
-    { type: 'command', icon: '📊', title: '/export', desc: 'Project Export & Report Generator (JSON/CSV)', action: () => { switchView('view-settings'); document.querySelector('#settings-subtabs [data-subtab="snapshot"]')?.click(); } },
-    { type: 'command', icon: '✦', title: '/oracle', desc: 'Consult Oracle AI Assistant', action: () => switchView('view-oracle') },
-    { type: 'command', icon: '🚪', title: '/signout', desc: 'Sign out of current account', action: () => document.getElementById('btn-header-signout')?.click() }
+    { type: 'command', tagClass: 'tag-cmd', icon: '📋', title: '/tasks', desc: 'Jump to Kanban Sprint Board', action: () => { switchView('view-tasks'); document.getElementById('tab-tasks-all')?.click(); } },
+    { type: 'command', tagClass: 'tag-cmd', icon: '👤', title: '/mine', desc: 'Jump to Assigned to Me (Personal Checklist)', action: () => { switchView('view-tasks'); document.getElementById('tab-tasks-mine')?.click(); } },
+    { type: 'command', tagClass: 'tag-cmd', icon: '📞', title: '/call', desc: 'Open Google Meet Call Room & Bridges', action: () => switchView('view-callroom') },
+    { type: 'command', tagClass: 'tag-cmd', icon: '⭐', title: '/vote', desc: 'Jump to 1–5 Star Anonymous Peer Review', action: () => switchView('view-voting') },
+    { type: 'command', tagClass: 'tag-cmd', icon: '🤝', title: '/peers', desc: 'Open Multipurpose Peers & Feedback Hub', action: () => switchView('view-peers') },
+    { type: 'command', tagClass: 'tag-cmd', icon: '🛡️', title: '/signoff', desc: 'Sprint Deliverable Sign-Off & Approvals', action: () => { switchView('view-settings'); document.querySelector('#settings-subtabs [data-subtab="permissions"]')?.click(); } },
+    { type: 'command', tagClass: 'tag-cmd', icon: '📊', title: '/export', desc: 'Project Export & Report Generator (JSON/CSV)', action: () => { switchView('view-settings'); document.querySelector('#settings-subtabs [data-subtab="snapshot"]')?.click(); } },
+    { type: 'command', tagClass: 'tag-cmd', icon: '✦', title: '/oracle', desc: 'Consult Oracle AI Assistant', action: () => switchView('view-oracle') },
+    { type: 'command', tagClass: 'tag-cmd', icon: '🚪', title: '/signout', desc: 'Sign out of current account', action: () => document.getElementById('btn-header-signout')?.click() }
   ];
 
   function renderResults(query) {
@@ -2773,94 +2898,120 @@ function setupCommandPalette() {
     resultsContainer.innerHTML = '';
     currentItems = [];
 
-    // Commands
     const matchedCommands = baseCommands.filter(c => !q || c.title.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q));
-    matchedCommands.forEach(c => currentItems.push(c));
 
-    // Tasks matching query
-    if (q) {
-      const matchedTasks = (state.tasks || []).filter(t => 
-        t.title.toLowerCase().includes(q) || 
+    let matchedTasks = [];
+    if (state.tasks && state.tasks.length > 0) {
+      matchedTasks = state.tasks.filter(t =>
+        !q || t.title.toLowerCase().includes(q) ||
         (t.description && t.description.toLowerCase().includes(q)) ||
         (t.assignee_name && t.assignee_name.toLowerCase().includes(q))
-      );
-      matchedTasks.slice(0, 5).forEach(t => {
-        currentItems.push({
-          type: 'task',
-          icon: '📌',
-          title: t.title,
-          desc: `Track: ${t.track.toUpperCase()} · Status: ${t.status} · Due: ${t.deadline || 'Flexible'}`,
-          action: () => {
-            switchView('view-tasks');
-            document.getElementById('tab-tasks-all')?.click();
-            openTaskRevisionInspector(t);
-          }
-        });
-      });
-
-      // Teammates matching query
-      const matchedMembers = (state.members || []).filter(m =>
-        m.name.toLowerCase().includes(q) ||
-        (m.role && m.role.toLowerCase().includes(q)) ||
-        (m.handle && m.handle.toLowerCase().includes(q))
-      );
-      matchedMembers.slice(0, 4).forEach(m => {
-        currentItems.push({
-          type: 'member',
-          icon: '🧑‍💻',
-          title: `${m.name} (@${m.handle})`,
-          desc: `${m.role} · ${m.team_track.toUpperCase()}`,
-          action: () => {
-            openSendFeedbackModal(m.id);
-          }
-        });
-      });
+      ).slice(0, 4).map(t => ({
+        type: 'task',
+        tagClass: 'tag-task',
+        icon: '📌',
+        title: t.title,
+        desc: `Track: ${(t.track || 'Core').toUpperCase()} · Status: ${t.status} · Due: ${t.deadline || 'Flexible'}`,
+        action: () => {
+          switchView('view-tasks');
+          document.getElementById('tab-tasks-all')?.click();
+          openTaskRevisionInspector(t);
+        }
+      }));
     }
 
-    if (currentItems.length === 0) {
+    let matchedMembers = [];
+    if (state.members && state.members.length > 0) {
+      matchedMembers = state.members.filter(m =>
+        !q || m.name.toLowerCase().includes(q) ||
+        (m.role && m.role.toLowerCase().includes(q)) ||
+        (m.handle && m.handle.toLowerCase().includes(q))
+      ).slice(0, 4).map(m => ({
+        type: 'member',
+        tagClass: 'tag-peer',
+        icon: '🧑‍💻',
+        title: `${m.name} (@${m.handle})`,
+        desc: `${m.role} · ${(m.team_track || 'General').toUpperCase()}`,
+        action: () => {
+          openSendFeedbackModal(m.id);
+        }
+      }));
+    }
+
+    // Build categories
+    const categories = [];
+    if (matchedCommands.length > 0) {
+      categories.push({ name: 'Actions & Shortcuts', items: matchedCommands });
+    }
+    if (matchedTasks.length > 0) {
+      categories.push({ name: 'Sprint Tasks & Deliverables', items: matchedTasks });
+    }
+    if (matchedMembers.length > 0) {
+      categories.push({ name: 'Teammates & Directory', items: matchedMembers });
+    }
+
+    if (categories.length === 0) {
       resultsContainer.innerHTML = `
-        <div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px;">
-          No matching items found for "${escapeHtml(q)}".
+        <div style="padding: 32px 16px; text-align: center; color: var(--text-muted); font-size: 13.5px;">
+          <div style="font-size: 24px; margin-bottom: 8px;">🔍</div>
+          No matching commands, tasks, or teammates found for "${escapeHtml(q)}".
         </div>
       `;
       return;
     }
 
-    if (selectedIndex >= currentItems.length) selectedIndex = 0;
+    let itemCounter = 0;
+    categories.forEach(cat => {
+      const header = document.createElement('div');
+      header.className = 'palette-section-title';
+      header.textContent = cat.name;
+      resultsContainer.appendChild(header);
 
-    currentItems.forEach((item, idx) => {
-      const el = document.createElement('div');
-      el.className = `palette-item ${idx === selectedIndex ? 'selected' : ''}`;
-      el.innerHTML = `
-        <div class="palette-item-left">
-          <span style="font-size: 16px;">${item.icon}</span>
-          <div>
-            <div style="font-weight: 500; color: var(--text-primary); font-size: 13.5px;">${escapeHtml(item.title)}</div>
-            <div style="font-size: 11.5px; color: var(--text-muted);">${escapeHtml(item.desc)}</div>
+      cat.items.forEach(item => {
+        const itemIdx = itemCounter++;
+        currentItems.push(item);
+
+        const el = document.createElement('div');
+        el.className = `palette-item ${itemIdx === selectedIndex ? 'selected' : ''}`;
+        el.dataset.index = itemIdx;
+        el.innerHTML = `
+          <div class="palette-item-left">
+            <div class="palette-item-icon-box">${item.icon}</div>
+            <div style="min-width: 0;">
+              <div class="palette-item-title">${escapeHtml(item.title)}</div>
+              <div class="palette-item-desc">${escapeHtml(item.desc)}</div>
+            </div>
           </div>
-        </div>
-        <span class="palette-tag">${item.type.toUpperCase()}</span>
-      `;
+          <div class="palette-item-right">
+            <span class="palette-tag ${item.tagClass}">${item.type.toUpperCase()}</span>
+            <span class="palette-enter-hint">↵</span>
+          </div>
+        `;
 
-      el.addEventListener('click', () => {
-        closePalette();
-        item.action();
+        el.addEventListener('click', () => {
+          closePalette();
+          item.action();
+        });
+
+        el.addEventListener('mouseenter', () => {
+          selectedIndex = itemIdx;
+          updateHighlight();
+        });
+
+        resultsContainer.appendChild(el);
       });
-
-      el.addEventListener('mouseenter', () => {
-        selectedIndex = idx;
-        updateHighlight();
-      });
-
-      resultsContainer.appendChild(el);
     });
+
+    if (selectedIndex >= currentItems.length) selectedIndex = 0;
+    updateHighlight();
   }
 
   function updateHighlight() {
     const items = resultsContainer.querySelectorAll('.palette-item');
     items.forEach((item, idx) => {
-      item.classList.toggle('selected', idx === selectedIndex);
-      if (idx === selectedIndex) {
+      const isSel = idx === selectedIndex;
+      item.classList.toggle('selected', isSel);
+      if (isSel) {
         item.scrollIntoView({ block: 'nearest' });
       }
     });
@@ -3139,6 +3290,13 @@ function setupEventListeners() {
 
   document.getElementById('btn-claim-blind-token')?.addEventListener('click', claimBlindToken);
   document.getElementById('form-submit-ballot')?.addEventListener('submit', castAnonymousBallot);
+  document.getElementById('btn-evaluate-another-peer')?.addEventListener('click', async () => {
+    const evalForm = document.getElementById('form-submit-ballot');
+    const completedBox = document.getElementById('voting-completed-box');
+    if (evalForm) evalForm.classList.remove('hidden');
+    if (completedBox) completedBox.classList.add('hidden');
+    await claimBlindToken();
+  });
   document.getElementById('btn-host-close-voting')?.addEventListener('click', hostCloseVotingSession);
   document.getElementById('btn-host-reopen-voting')?.addEventListener('click', hostReopenVotingSession);
   document.getElementById('btn-refresh-audit')?.addEventListener('click', loadAuditTrail);

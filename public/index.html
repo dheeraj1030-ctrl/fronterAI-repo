@@ -321,173 +321,228 @@
         <!-- ======================================================== -->
         <!-- MODULE 3: PEER REVIEW -->
         <!-- ======================================================== -->
+        <!-- ======================================================== -->
+        <!-- MODULE 3: PEER REVIEW & 1-5 STAR VOTING -->
+        <!-- ======================================================== -->
         <section id="view-voting" class="workspace-view">
           <div class="view-header">
             <div>
-              <h2 class="view-title">Peer Review</h2>
-              <p class="view-subtitle">Anonymous peer contribution feedback. Zero identity linkage in the ballot box.</p>
+              <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 4px;">
+                <h2 class="view-title" style="margin: 0;">Peer Review &amp; Recognition</h2>
+                <span class="status-pill pill-green" id="voting-status-pill"><span class="pulse-dot" style="background:#34a853; width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px;"></span>Active Round</span>
+              </div>
+              <p class="view-subtitle">Anonymous sprint contribution ratings (1–5 Stars). Cryptographically decoupled via HMAC blind tokens with zero identity linkage.</p>
             </div>
             <div class="header-action-group">
-              <span class="status-pill pill-green" id="voting-status-pill">Active Round</span>
-              <button class="btn btn-outlined" id="btn-host-close-voting">Close Review &amp; Reveal</button>
-              <button class="btn btn-outlined hidden" id="btn-host-reopen-voting">Reopen Review</button>
+              <button class="btn btn-outlined" id="btn-host-close-voting">Close Review &amp; Reveal Standings</button>
+              <button class="btn btn-outlined hidden" id="btn-host-reopen-voting">Reopen Review Round</button>
             </div>
           </div>
 
-          <!-- 2 Evaluation Templates -->
-          <div class="segmented-control" id="voting-template-tabs" style="margin-bottom: 14px;">
-            <button class="segmented-tab active" data-template-id="1">Peer Performance Review</button>
-            <button class="segmented-tab" data-template-id="2">Project Quality Review</button>
-          </div>
-
-          <!-- Stepper Track -->
-          <div class="stepper-card card" style="margin-bottom: 14px;">
-            <div class="stepper-track">
-              <div class="step-node completed" id="step-node-1">
-                <div class="node-icon">
+          <!-- Cryptographic Decoupling Protocol Stepper -->
+          <div class="voting-stepper-surface card" style="margin-bottom: 16px;">
+            <div class="voting-protocol-steps">
+              <div class="vstep-item completed" id="step-node-1">
+                <div class="vstep-icon">
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
                 </div>
-                <div class="node-content">
-                  <div class="node-title">1. Verified Member</div>
-                  <div class="node-desc" id="stepper-member-label">Alice Vance</div>
+                <div class="vstep-text">
+                  <span class="vstep-title">1. Verified Member</span>
+                  <span class="vstep-sub" id="stepper-member-label">Alice Vance</span>
                 </div>
               </div>
-              <div class="stepper-line completed" id="step-line-1"></div>
+              <div class="vstep-arrow">→</div>
 
-              <div class="step-node" id="step-node-2">
-                <div class="node-icon">2</div>
-                <div class="node-content">
-                  <div class="node-title">2. Secret Ballot</div>
-                  <div class="node-desc" id="stepper-token-label">Identity decoupled</div>
+              <div class="vstep-item active" id="step-node-2">
+                <div class="vstep-icon" id="step-node-2-icon">🛡️</div>
+                <div class="vstep-text">
+                  <span class="vstep-title">2. Blind HMAC Token</span>
+                  <span class="vstep-sub" id="stepper-token-label">Identity decoupled</span>
                 </div>
               </div>
-              <div class="stepper-line" id="step-line-2"></div>
+              <div class="vstep-arrow">→</div>
 
-              <div class="step-node" id="step-node-3">
-                <div class="node-icon">3</div>
-                <div class="node-content">
-                  <div class="node-title">3. Vote for Peer</div>
-                  <div class="node-desc">Unlinked drop</div>
+              <div class="vstep-item" id="step-node-3">
+                <div class="vstep-icon">⭐</div>
+                <div class="vstep-text">
+                  <span class="vstep-title">3. 1–5 Star Rating</span>
+                  <span class="vstep-sub">Unlinked drop</span>
                 </div>
               </div>
-              <div class="stepper-line" id="step-line-3"></div>
+              <div class="vstep-arrow">→</div>
 
-              <div class="step-node" id="step-node-4">
-                <div class="node-icon">4</div>
-                <div class="node-content">
-                  <div class="node-title">4. Recognition Tally</div>
-                  <div class="node-desc">Revealed by Lead</div>
+              <div class="vstep-item" id="step-node-4">
+                <div class="vstep-icon">🏆</div>
+                <div class="vstep-text">
+                  <span class="vstep-title">4. Recognition Standings</span>
+                  <span class="vstep-sub">Aggregated reveal</span>
                 </div>
               </div>
             </div>
           </div>
 
+          <!-- Main Voting Grid -->
           <div class="voting-workspace-grid">
+            
+            <!-- Left Column: Interactive Evaluation Canvas -->
             <div class="voting-main-card card">
-              <div class="session-info-badge">
-                <span class="info-label">EVALUATION ROUND:</span>
-                <span class="info-id">SPRINT-1-PEER-REVIEW</span>
-              </div>
-              <h3 class="session-headline" id="voting-session-headline">Sprint 1 Peer Review &amp; Contribution Standings</h3>
-              <p class="session-summary" id="voting-session-summary">Vote for the peer who demonstrated the highest technical impact, reliability, and support in Sprint 1.</p>
-
-              <!-- State 1: Claim Blind Token -->
-              <div id="voting-claim-box" class="voting-subsurface">
-                <div class="subsurface-header">
-                  <div class="icon-circle icon-blue">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>
-                  </div>
-                  <div>
-                    <h4>Step 1: Get Secret Ballot</h4>
-                    <p id="voting-claim-desc">Your eligibility is stamped on the ledger, and an unlinked cryptographic token is generated with zero identity linkage.</p>
-                  </div>
+              <div class="evaluation-metric-header">
+                <div class="metric-badge-chip">
+                  <span class="metric-icon">⭐</span>
+                  <span class="metric-name">Single Metric: Sprint Contribution &amp; Team Collaboration</span>
                 </div>
-                <div class="subsurface-actions">
-                  <button id="btn-claim-blind-token" class="btn btn-filled">Get Secret Ballot</button>
-                </div>
+                <div class="session-round-tag" id="voting-session-headline">Sprint 1 Evaluation Round</div>
               </div>
 
-              <!-- State 2: Cast Ballot for a Team Member (1-5 Rating) -->
-              <div id="voting-cast-box" class="voting-subsurface hidden">
-                <div class="subsurface-header">
-                  <div class="icon-circle icon-green">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 12 2 2 4-4"></path><path d="M5 7c0-1.1.9-2 2-2h10a2 2 0 0 1 2 2v12H5V7Z"></path><path d="M22 19H2"></path></svg>
+              <!-- Live Peer Evaluation Form (Always interactive!) -->
+              <form id="form-submit-ballot" class="peer-evaluation-form">
+                
+                <!-- Section 1: Choose Teammate -->
+                <div class="eval-section">
+                  <div class="eval-section-title">
+                    <span>1. Select Teammate to Evaluate</span>
+                    <span class="eval-helper-hint">Pick any teammate to submit an anonymous 1–5 star rating</span>
                   </div>
-                  <div>
-                    <h4>Step 2: Anonymous Peer Evaluation (1 to 5 Stars)</h4>
-                    <p>Select a teammate and rate their <strong>Sprint Contribution &amp; Collaboration</strong>. Your ballot carries NO member identity.</p>
+                  <div class="candidate-roster-grid" id="ballot-options-container">
+                    <!-- Populated dynamically with rich candidate cards -->
+                  </div>
+                </div>
+
+                <!-- Section 2: Interactive 1-5 Star Selector -->
+                <div class="eval-section" style="margin-top: 18px;">
+                  <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 8px; margin-bottom: 10px;">
+                    <div class="eval-section-title" style="margin-bottom: 0;">2. Rate Sprint Contribution &amp; Collaboration</div>
+                    <div id="rating-score-label" class="rating-dynamic-score">5 / 5 ★ (Outstanding Impact)</div>
+                  </div>
+                  <p class="eval-score-explanation" id="rating-score-explainer">Exceptional sprint velocity, architecture leadership, and proactive peer support.</p>
+
+                  <!-- 5 Star Interactive Rating Selector -->
+                  <div class="star-rating-showcase" id="star-rating-selector">
+                    <button type="button" class="star-btn" data-rating="1" title="1 Star - Needs Improvement">
+                      <span class="star-symbol">★</span>
+                      <span class="star-val">1</span>
+                      <span class="star-desc">Needs Improvement</span>
+                    </button>
+                    <button type="button" class="star-btn" data-rating="2" title="2 Stars - Fair">
+                      <span class="star-symbol">★</span>
+                      <span class="star-val">2</span>
+                      <span class="star-desc">Fair</span>
+                    </button>
+                    <button type="button" class="star-btn" data-rating="3" title="3 Stars - Good">
+                      <span class="star-symbol">★</span>
+                      <span class="star-val">3</span>
+                      <span class="star-desc">Good</span>
+                    </button>
+                    <button type="button" class="star-btn" data-rating="4" title="4 Stars - Very Good">
+                      <span class="star-symbol">★</span>
+                      <span class="star-val">4</span>
+                      <span class="star-desc">Very Good</span>
+                    </button>
+                    <button type="button" class="star-btn active" data-rating="5" title="5 Stars - Outstanding">
+                      <span class="star-symbol">★</span>
+                      <span class="star-val">5</span>
+                      <span class="star-desc">Outstanding</span>
+                    </button>
+                  </div>
+                  <input type="hidden" id="selected-ballot-rating" value="5">
+                </div>
+
+                <!-- Section 3: Optional Commendation / Highlight Tags -->
+                <div class="eval-section" style="margin-top: 16px;">
+                  <div class="eval-section-title" style="margin-bottom: 8px;">3. Highlight Key Strengths (Optional)</div>
+                  <div class="praise-chips-group" id="voting-praise-chips">
+                    <button type="button" class="praise-chip" data-praise="🚀 High Velocity">🚀 High Velocity</button>
+                    <button type="button" class="praise-chip" data-praise="🤝 Team Player">🤝 Team Player</button>
+                    <button type="button" class="praise-chip" data-praise="💻 Clean Architecture">💻 Clean Architecture</button>
+                    <button type="button" class="praise-chip" data-praise="💡 Problem Solver">💡 Problem Solver</button>
+                    <button type="button" class="praise-chip" data-praise="⚡ Fast Turnaround">⚡ Fast Turnaround</button>
                   </div>
                 </div>
 
-                <form id="form-submit-ballot" class="ballot-choices-form">
-                  <div class="form-field" style="margin-bottom: 16px;">
-                    <label style="font-weight: 600; font-size: 13px; margin-bottom: 8px; display: block;">Select Team Member to Evaluate:</label>
-                    <div class="choices-stack" id="ballot-options-container">
-                      <!-- Populated dynamically with Team Members -->
-                    </div>
+                <!-- Cryptographic Identity Shield Banner -->
+                <div class="crypto-shield-banner" id="crypto-shield-banner">
+                  <div class="shield-icon">🔒</div>
+                  <div class="shield-info">
+                    <strong>HMAC-SHA256 Blind Ballot Protection</strong>
+                    <p id="crypto-token-status-text">Your evaluation is signed with a blind cryptographic token. The database commits the rating with zero link to your account.</p>
+                    <code id="display-blind-token" style="display: none;"></code>
                   </div>
-
-                  <!-- 1 to 5 Star Rating Metric -->
-                  <div class="form-field" style="margin-bottom: 18px; background: var(--bg-surface-elevated); padding: 14px; border-radius: 8px; border: 1px solid var(--border-subtle);">
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                      <label style="font-weight: 600; font-size: 13px; margin: 0;">Sprint Contribution &amp; Collaboration Metric:</label>
-                      <span id="rating-score-label" style="font-weight: 700; color: #fbbc04; font-size: 14px;">5 / 5 ★ (Outstanding)</span>
-                    </div>
-                    <div class="star-rating-bar" id="star-rating-selector" style="display: flex; gap: 8px;">
-                      <button type="button" class="rating-star-btn" data-rating="1" title="1 - Needs Improvement" style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-surface); cursor: pointer; font-size: 16px;">★ 1</button>
-                      <button type="button" class="rating-star-btn" data-rating="2" title="2 - Fair" style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-surface); cursor: pointer; font-size: 16px;">★ 2</button>
-                      <button type="button" class="rating-star-btn" data-rating="3" title="3 - Good" style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-surface); cursor: pointer; font-size: 16px;">★ 3</button>
-                      <button type="button" class="rating-star-btn" data-rating="4" title="4 - Very Good" style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-surface); cursor: pointer; font-size: 16px;">★ 4</button>
-                      <button type="button" class="rating-star-btn active" data-rating="5" title="5 - Outstanding" style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--google-blue); background: rgba(66,133,244,0.15); color: #fbbc04; cursor: pointer; font-size: 16px;">★ 5</button>
-                    </div>
-                    <input type="hidden" id="selected-ballot-rating" value="5">
-                  </div>
-
-                  <div class="token-proof-box">
-                    <span class="proof-label">Cryptographic Token Attached (HMAC Signature):</span>
-                    <code id="display-blind-token" class="proof-code">...</code>
-                  </div>
-
-                  <div class="subsurface-actions">
-                    <button type="submit" class="btn btn-filled">Submit Anonymous Evaluation</button>
-                  </div>
-                </form>
-              </div>
-
-              <!-- State 3: Voted -->
-              <div id="voting-completed-box" class="voting-subsurface hidden">
-                <div class="subsurface-header">
-                  <div class="icon-circle icon-green">
-                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
-                  </div>
-                  <div>
-                    <h4>Evaluation Recorded in Anonymous Ballot Box</h4>
-                    <p id="voting-status-msg">Your 1–5 performance rating has been committed anonymously. Results will be calculated in aggregate.</p>
-                  </div>
+                  <button type="button" class="btn btn-outlined btn-sm" id="btn-claim-blind-token" style="flex-shrink: 0;">Refresh Token</button>
                 </div>
+
+                <div class="eval-submit-actions">
+                  <button type="submit" class="btn btn-filled btn-submit-ballot" id="btn-submit-evaluation">
+                    <span>Submit Anonymous 1–5 Star Rating</span>
+                    <span class="btn-arrow">→</span>
+                  </button>
+                </div>
+              </form>
+
+              <!-- State: Evaluation Committed Notification -->
+              <div id="voting-completed-box" class="voting-success-card hidden">
+                <div class="success-icon-box">✓</div>
+                <div>
+                  <h4>Evaluation Successfully Committed!</h4>
+                  <p id="voting-status-msg">Your 1–5 star rating has been deposited into the anonymous ballot box with HMAC decoupling. Standings update live in aggregate.</p>
+                </div>
+                <button type="button" class="btn btn-outlined btn-sm" id="btn-evaluate-another-peer" style="margin-top: 8px;">+ Evaluate Another Teammate</button>
               </div>
             </div>
 
-            <!-- Participation & Tally -->
-            <div class="voting-stats-card card">
-              <h4 class="stats-card-title">Team Participation</h4>
-              <div class="radial-participation-box">
-                <div class="participation-ring-stat">
-                  <span class="participation-number" id="stats-ballots-count">0</span>
-                  <span class="participation-total" id="stats-ballots-total">/ 0 Evaluated</span>
+            <!-- Right Column: Live Participation & Standings Leaderboard -->
+            <div class="voting-sidebar-column">
+              
+              <!-- Participation Radial Card -->
+              <div class="card participation-hero-card">
+                <h4 class="card-section-title">Team Participation</h4>
+                <div class="participation-meter-layout">
+                  <div class="circular-meter-wrap">
+                    <svg class="circular-chart" viewBox="0 0 36 36">
+                      <path class="circle-bg" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                      <path class="circle-fill" id="participation-circle-fill" stroke-dasharray="0, 100" d="M18 2.0845 a 15.9155 15.9155 0 0 1 0 31.831 a 15.9155 15.9155 0 0 1 0 -31.831"/>
+                      <text x="18" y="20.35" class="circle-pct" id="stats-participation-pct">0%</text>
+                    </svg>
+                  </div>
+                  <div class="meter-details">
+                    <div class="meter-hero-number">
+                      <span id="stats-ballots-count">0</span>
+                      <span class="meter-total" id="stats-ballots-total">/ 0</span>
+                    </div>
+                    <div class="meter-subtitle">Evaluations Cast</div>
+                    <div class="meter-status-pill" id="participation-status-pill">Active Round in Progress</div>
+                  </div>
                 </div>
-                <div class="participation-bar-outer">
+                <div class="participation-bar-outer" style="margin-top: 14px;">
                   <div class="participation-bar-inner" id="stats-ballots-bar" style="width: 0%;"></div>
                 </div>
-                <p class="participation-explainer" id="stats-participation-explainer">Waiting for team evaluations before aggregate reveal.</p>
               </div>
 
-              <!-- Tally Display -->
-              <div id="tally-results-container" class="tally-results-box hidden">
-                <h5>Peer Review Standings (Revealed)</h5>
-                <div class="tally-bars-stack" id="tally-bars-display"></div>
+              <!-- Sprint Recognition Standings Leaderboard -->
+              <div class="card standings-leaderboard-card">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                  <h4 class="card-section-title" style="margin: 0;">Sprint Standings</h4>
+                  <span class="leaderboard-live-pill" id="standings-live-tag">● LIVE AGGREGATE</span>
+                </div>
+                <div class="standings-cards-list" id="tally-bars-display">
+                  <!-- Filled dynamically with candidate ranking cards -->
+                </div>
               </div>
+
+              <!-- Zero-Identity Technical Privacy Guarantee -->
+              <div class="card privacy-guarantee-card">
+                <div class="guarantee-header">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8ab4f8" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                  <span>Zero-Knowledge Privacy Proof</span>
+                </div>
+                <ul class="guarantee-points">
+                  <li><strong>Decoupled Token:</strong> Server signs a blind HMAC token during claim.</li>
+                  <li><strong>Zero Member Link:</strong> Ballot submissions record rating and candidate ID only; no member ID or IP is logged.</li>
+                  <li><strong>Collision Guard:</strong> Unlinked token burns on commit to prevent double voting.</li>
+                </ul>
+              </div>
+
             </div>
+
           </div>
         </section>
 
@@ -1114,16 +1169,25 @@
   <!-- MODAL: COMMAND PALETTE (CTRL+K / CMD+K) -->
   <dialog id="modal-command-palette" class="command-palette-dialog">
     <div class="palette-input-wrap">
-      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="color: var(--text-muted);"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-      <input type="text" id="palette-search-input" placeholder="Type a command or jump to task, member, or view... (e.g. /call, /vote, /export)" autocomplete="off">
-      <span class="search-kbd" style="font-size: 11px;">ESC</span>
+      <div class="palette-search-icon-box">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+      </div>
+      <input type="text" id="palette-search-input" placeholder="Search tasks, teammates, views, or commands (/tasks, /call, /vote)..." autocomplete="off" spellcheck="false">
+      <kbd class="palette-esc-kbd" id="btn-close-palette-esc" title="Press Escape to close">ESC</kbd>
     </div>
     <div class="palette-results-list" id="palette-results-list">
-      <!-- Populated dynamically with tasks, teammates, commands, and views -->
+      <!-- Populated dynamically with grouped categories -->
     </div>
     <div class="palette-footer">
-      <span>Use <kbd style="background:var(--bg-canvas); padding:2px 5px; border-radius:3px; border:1px solid var(--border-default);">↑</kbd> <kbd style="background:var(--bg-canvas); padding:2px 5px; border-radius:3px; border:1px solid var(--border-default);">↓</kbd> to navigate, <kbd style="background:var(--bg-canvas); padding:2px 5px; border-radius:3px; border:1px solid var(--border-default);">Enter</kbd> to select</span>
-      <span>Frontier AI Quick Switcher</span>
+      <div class="palette-shortcuts-hints">
+        <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span>
+        <span><kbd>↵</kbd> Select</span>
+        <span><kbd>Esc</kbd> Close</span>
+      </div>
+      <div class="palette-brand-tag">
+        <span class="pulse-dot-blue"></span>
+        <span>Frontier AI Quick Switcher</span>
+      </div>
     </div>
   </dialog>
 
