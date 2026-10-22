@@ -57,6 +57,7 @@ async function init() {
   setupModals();
   setupPersonaDropdown();
   setupGlobalSearch();
+  setupCommandPalette();
   setupAuthScreen();
 
   // Check URL query parameters for OAuth callbacks and alerts
@@ -181,8 +182,8 @@ function setupNavigation() {
     btn.addEventListener('click', () => {
       const subtab = btn.dataset.subtab;
       const isHost = state.currentUser && !!state.currentUser.is_host;
-      if (!isHost && (subtab === 'permissions' || subtab === 'history' || subtab === 'snapshot')) {
-        showToast('Team Lead Only: This administrative section is managed by the Team Lead.', true);
+      if (!isHost && subtab === 'history') {
+        showToast('Team Lead Only: The administrative audit trail is restricted to the Team Lead.', true);
         return;
       }
 
@@ -617,15 +618,24 @@ function renderPersonalDashboard() {
         const hasDeliverable = !!task.deliverable_url;
 
         row.innerHTML = `
-          <div>
-            <div class="compact-task-title">${task.title}</div>
+          <div style="flex: 1; cursor: pointer;" class="btn-inspect-task">
+            <div class="compact-task-title">${task.title} <span style="font-size:11px; color:var(--google-blue); margin-left:6px;">(v${task.version || 1}) 🔍</span></div>
             <div class="compact-task-assignee">Target Date: <strong>${task.deadline || 'Flexible'}</strong> · Status: <strong>${task.status}</strong></div>
-            ${hasDeliverable ? `<div style="margin-top:4px;"><a href="${task.deliverable_url}" target="_blank" class="deliverable-link">PR: ${task.deliverable_url}</a></div>` : ''}
+            ${hasDeliverable ? `<div style="margin-top:4px;"><a href="${task.deliverable_url}" target="_blank" class="deliverable-link">Deliverable: ${task.deliverable_url}</a></div>` : ''}
           </div>
           <div style="display:flex; gap:6px; align-items:center;">
+            <button class="btn btn-outlined btn-sm btn-inspect-task" title="View edit history and revisions">History</button>
             <span class="track-badge track-${task.track}">${task.status.replace('_', ' ')}</span>
           </div>
         `;
+
+        row.querySelectorAll('.btn-inspect-task').forEach(el => {
+          el.addEventListener('click', (e) => {
+            if (e.target.closest('.deliverable-link')) return;
+            openTaskRevisionInspector(task);
+          });
+        });
+
         taskList.appendChild(row);
       });
     }
@@ -1029,17 +1039,17 @@ function createKanbanCard(task) {
 
   const deliverableHtml = task.deliverable_url
     ? `<a href="${task.deliverable_url}" target="_blank" class="deliverable-link">
-        PR / Deliverable
+        Deliverable Link ↗
        </a>`
     : '';
 
   card.innerHTML = `
     <div class="card-top-bar">
       <span class="track-badge track-${task.track}">${task.track.toUpperCase()}</span>
-      <span class="occ-version-pill" title="Target Deadline">Due: ${task.deadline || 'Flexible'}</span>
+      <span class="occ-version-pill btn-inspect-task" style="cursor: pointer;" title="Click to inspect task version history and audit trail">v${task.version} · Due: ${task.deadline || 'Flexible'} 🔍</span>
     </div>
     
-    <div>
+    <div class="kanban-card-body btn-inspect-task" style="cursor: pointer;" title="Click to inspect task history & revisions">
       <h4 class="kanban-card-title">${task.title}</h4>
       <p class="kanban-card-desc">${task.description || ''}</p>
     </div>
@@ -1053,6 +1063,7 @@ function createKanbanCard(task) {
       </div>
 
       <div class="card-action-btns">
+        <button class="btn btn-outlined btn-sm btn-inspect-history" title="View edit history and deliverable notes">History</button>
         ${task.status !== 'IN_PROGRESS' ? `<button class="btn btn-outlined btn-sm btn-advance-task" data-id="${task.id}" data-version="${task.version}" data-next="IN_PROGRESS" title="Mark In Progress">In Progress</button>` : ''}
         ${task.status !== 'COMPLETED' ? `<button class="btn btn-filled btn-sm btn-advance-task" data-id="${task.id}" data-version="${task.version}" data-next="COMPLETED" title="Mark Completed">Complete</button>` : ''}
         <button class="btn btn-icon btn-test-occ" data-id="${task.id}" data-version="${task.version}" title="Simulate Stale OCC Write Conflict">
@@ -1061,6 +1072,14 @@ function createKanbanCard(task) {
       </div>
     </div>
   `;
+
+  // History Inspector triggers
+  card.querySelectorAll('.btn-inspect-task, .btn-inspect-history').forEach(el => {
+    el.addEventListener('click', (e) => {
+      if (e.target.closest('.deliverable-link') || e.target.closest('.btn-advance-task') || e.target.closest('.btn-test-occ')) return;
+      openTaskRevisionInspector(task);
+    });
+  });
 
   // Status transitions
   card.querySelectorAll('.btn-advance-task').forEach(btn => {
@@ -1073,7 +1092,7 @@ function createKanbanCard(task) {
   });
 
   // OCC Demonstration
-  card.querySelector('.btn-test-occ').addEventListener('click', async () => {
+  card.querySelector('.btn-test-occ')?.addEventListener('click', async () => {
     const taskId = parseInt(task.id, 10);
     const staleVersion = task.version - 1;
     await updateTaskWithOccCheck(taskId, { status: 'COMPLETED', version: staleVersion }, task);
@@ -1653,8 +1672,8 @@ function renderTickets() {
         <svg class="empty-state-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
           <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path>
         </svg>
-        <h4>No Access Requests</h4>
-        <p>No privileged access tickets have been raised yet. Use the button above to request access.</p>
+        <h4>No Deliverable Sign-Off Requests</h4>
+        <p>No sprint deliverable or milestone sign-off requests are currently pending. When you finish a task, click "+ Request Sign-Off" above to initiate peer review verification.</p>
       </div>`;
     return;
   }
@@ -1669,9 +1688,9 @@ function renderTickets() {
     let actionBtnHtml = '';
     if (isPending) {
       if (isRequester) {
-        actionBtnHtml = `<button class="btn btn-outlined btn-sm btn-approve-ticket" data-id="${ticket.id}">Approve (Test Self-Approval Guard)</button>`;
+        actionBtnHtml = `<button class="btn btn-outlined btn-sm btn-approve-ticket" data-id="${ticket.id}">Sign Off (Self-Approval Guarded)</button>`;
       } else {
-        actionBtnHtml = `<button class="btn btn-filled btn-sm btn-approve-ticket" data-id="${ticket.id}">Peer Review & Approve</button>`;
+        actionBtnHtml = `<button class="btn btn-filled btn-sm btn-approve-ticket" data-id="${ticket.id}">Review &amp; Sign Off</button>`;
       }
     }
 
@@ -1681,18 +1700,18 @@ function renderTickets() {
           <h4>${ticket.title}</h4>
           <span class="ticket-scope-tag">${ticket.scope}</span>
         </div>
-        <span class="kpi-tag ${isPending ? 'tag-amber' : 'tag-green'}">${ticket.status.replace('_', ' ')}</span>
+        <span class="kpi-tag ${isPending ? 'tag-amber' : 'tag-green'}">${isPending ? 'PENDING SIGN-OFF' : 'SIGNED OFF'}</span>
       </div>
 
       <div class="ticket-reason-box">
-        <strong>Justification:</strong> ${ticket.reason}
+        <strong>Review Context &amp; Notes:</strong> ${ticket.reason}
       </div>
 
       <div class="ticket-pipeline-nodes">
         <div class="pipeline-node">
           <div class="user-avatar">${getInitials(ticket.requester_name)}</div>
           <div>
-            <div class="node-role-label">Requester</div>
+            <div class="node-role-label">Author / Submitter</div>
             <div class="node-name-label">${ticket.requester_name}</div>
           </div>
         </div>
@@ -1704,15 +1723,15 @@ function renderTickets() {
         <div class="pipeline-node">
           <div class="user-avatar">${ticket.approver_name ? getInitials(ticket.approver_name) : '?'}</div>
           <div>
-            <div class="node-role-label">Independent Approver</div>
-            <div class="node-name-label">${ticket.approver_name || 'Pending Peer Review'}</div>
+            <div class="node-role-label">Independent Reviewer</div>
+            <div class="node-name-label">${ticket.approver_name || 'Pending Peer Sign-Off'}</div>
           </div>
         </div>
 
         <div class="pipeline-node">
           <div>
-            <div class="node-role-label">Capability Lifetime</div>
-            <div class="node-name-label">${ticket.expires_at ? `Active until ${new Date(ticket.expires_at).toLocaleTimeString()}` : `${ticket.duration_minutes} Mins Requested`}</div>
+            <div class="node-role-label">Review Window</div>
+            <div class="node-name-label">${ticket.expires_at ? `Active until ${new Date(ticket.expires_at).toLocaleTimeString()}` : `${ticket.duration_minutes} Mins Window`}</div>
           </div>
         </div>
 
@@ -1737,14 +1756,14 @@ async function approveTicket(ticketId) {
     const data = await res.json();
 
     if (!res.ok) {
-      showToast(data.error || '2-Man Rule Violation: Requester cannot self-approve!', true);
+      showToast(data.error || 'Two-Person Rule Violation: Submitter cannot sign off on their own deliverable!', true);
       return;
     }
 
-    showToast(data.message || 'Ticket approved! Ephemeral capability granted.');
+    showToast(data.message || 'Deliverable successfully signed off and verified by peer review!');
     await loadTickets();
   } catch (err) {
-    showToast('Failed to approve ticket', true);
+    showToast('Failed to sign off deliverable', true);
   }
 }
 
@@ -2050,6 +2069,11 @@ function setupModals() {
     occModal.close();
     await loadTasks();
   });
+
+  // Task Revision & Activity Inspector modal
+  const taskHistoryModal = document.getElementById('modal-task-history');
+  document.getElementById('btn-close-task-history-modal')?.addEventListener('click', () => taskHistoryModal?.close());
+  document.getElementById('btn-close-task-history-btn')?.addEventListener('click', () => taskHistoryModal?.close());
 
   // Onboard Member modal (Host only)
   const onboardModal = document.getElementById('modal-onboard-member');
@@ -2674,40 +2698,13 @@ export function closeDockedCall() {
 
 function setupGlobalSearch() {
   const input = document.getElementById('global-search-input');
-  input?.addEventListener('input', (e) => {
-    const term = e.target.value.toLowerCase().trim();
-    if (!term) return;
-
-    if (term.includes('my') || term.includes('mine')) {
-      switchView('view-tasks');
-      document.getElementById('tab-tasks-mine')?.click();
-    } else if (term.includes('all') || term.includes('task') || term.includes('sprint') || term.includes('board')) {
-      switchView('view-tasks');
-      document.getElementById('tab-tasks-all')?.click();
-    } else if (term.includes('vote') || term.includes('ballot') || term.includes('peer') || term.includes('review')) {
-      switchView('view-voting');
-    } else if (term.includes('cal') || term.includes('meet') || term.includes('call') || term.includes('room')) {
-      switchView('view-callroom');
-    } else if (term.includes('roster') || term.includes('team') || term.includes('directory')) {
-      switchView('view-settings');
-      document.querySelector('#settings-subtabs [data-subtab="directory"]')?.click();
-    } else if (term.includes('permission') || term.includes('ticket') || term.includes('access')) {
-      switchView('view-settings');
-      document.querySelector('#settings-subtabs [data-subtab="permissions"]')?.click();
-    } else if (term.includes('audit') || term.includes('history') || term.includes('log')) {
-      switchView('view-settings');
-      document.querySelector('#settings-subtabs [data-subtab="history"]')?.click();
-    } else if (term.includes('snapshot') || term.includes('backup') || term.includes('data')) {
-      switchView('view-settings');
-      document.querySelector('#settings-subtabs [data-subtab="snapshot"]')?.click();
-    }
+  input?.addEventListener('click', (e) => {
+    e.preventDefault();
+    openCommandPalette();
   });
-
-  document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
-      e.preventDefault();
-      input?.focus();
-    }
+  input?.addEventListener('focus', (e) => {
+    e.preventDefault();
+    openCommandPalette();
   });
 
   const auditFilter = document.getElementById('audit-search-input');
@@ -2715,6 +2712,419 @@ function setupGlobalSearch() {
     state.auditSearchTerm = e.target.value;
     renderAuditTrail();
   });
+}
+
+// -------------------------------------------------------------
+// COMMAND PALETTE / QUICK SWITCHER (CTRL+K / CMD+K)
+// -------------------------------------------------------------
+let openCommandPalette = () => {};
+
+function setupCommandPalette() {
+  const modal = document.getElementById('modal-command-palette');
+  const input = document.getElementById('palette-search-input');
+  const resultsContainer = document.getElementById('palette-results-list');
+
+  if (!modal || !input || !resultsContainer) return;
+
+  let selectedIndex = 0;
+  let currentItems = [];
+
+  openCommandPalette = (initialQuery = '') => {
+    input.value = initialQuery;
+    modal.showModal();
+    renderResults(initialQuery);
+    setTimeout(() => input.focus(), 50);
+  };
+
+  const closePalette = () => {
+    modal.close();
+  };
+
+  // Keyboard shortcut: Ctrl+K or Cmd+K toggles palette
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      if (modal.open) {
+        closePalette();
+      } else {
+        openCommandPalette();
+      }
+    }
+  });
+
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) closePalette();
+  });
+
+  const baseCommands = [
+    { type: 'command', icon: '📋', title: '/tasks', desc: 'Jump to Kanban Sprint Board', action: () => { switchView('view-tasks'); document.getElementById('tab-tasks-all')?.click(); } },
+    { type: 'command', icon: '👤', title: '/mine', desc: 'Jump to Assigned to Me (Personal Checklist)', action: () => { switchView('view-tasks'); document.getElementById('tab-tasks-mine')?.click(); } },
+    { type: 'command', icon: '📞', title: '/call', desc: 'Open Google Meet Call Room', action: () => switchView('view-callroom') },
+    { type: 'command', icon: '⭐', title: '/vote', desc: 'Jump to 1–5 Star Anonymous Peer Review', action: () => switchView('view-voting') },
+    { type: 'command', icon: '🤝', title: '/peers', desc: 'Open Multipurpose Peers & Feedback Hub', action: () => switchView('view-peers') },
+    { type: 'command', icon: '🛡️', title: '/signoff', desc: 'Sprint Deliverable Sign-Off & Approvals', action: () => { switchView('view-settings'); document.querySelector('#settings-subtabs [data-subtab="permissions"]')?.click(); } },
+    { type: 'command', icon: '📊', title: '/export', desc: 'Project Export & Report Generator (JSON/CSV)', action: () => { switchView('view-settings'); document.querySelector('#settings-subtabs [data-subtab="snapshot"]')?.click(); } },
+    { type: 'command', icon: '✦', title: '/oracle', desc: 'Consult Oracle AI Assistant', action: () => switchView('view-oracle') },
+    { type: 'command', icon: '🚪', title: '/signout', desc: 'Sign out of current account', action: () => document.getElementById('btn-header-signout')?.click() }
+  ];
+
+  function renderResults(query) {
+    const q = (query || '').toLowerCase().trim();
+    resultsContainer.innerHTML = '';
+    currentItems = [];
+
+    // Commands
+    const matchedCommands = baseCommands.filter(c => !q || c.title.toLowerCase().includes(q) || c.desc.toLowerCase().includes(q));
+    matchedCommands.forEach(c => currentItems.push(c));
+
+    // Tasks matching query
+    if (q) {
+      const matchedTasks = (state.tasks || []).filter(t => 
+        t.title.toLowerCase().includes(q) || 
+        (t.description && t.description.toLowerCase().includes(q)) ||
+        (t.assignee_name && t.assignee_name.toLowerCase().includes(q))
+      );
+      matchedTasks.slice(0, 5).forEach(t => {
+        currentItems.push({
+          type: 'task',
+          icon: '📌',
+          title: t.title,
+          desc: `Track: ${t.track.toUpperCase()} · Status: ${t.status} · Due: ${t.deadline || 'Flexible'}`,
+          action: () => {
+            switchView('view-tasks');
+            document.getElementById('tab-tasks-all')?.click();
+            openTaskRevisionInspector(t);
+          }
+        });
+      });
+
+      // Teammates matching query
+      const matchedMembers = (state.members || []).filter(m =>
+        m.name.toLowerCase().includes(q) ||
+        (m.role && m.role.toLowerCase().includes(q)) ||
+        (m.handle && m.handle.toLowerCase().includes(q))
+      );
+      matchedMembers.slice(0, 4).forEach(m => {
+        currentItems.push({
+          type: 'member',
+          icon: '🧑‍💻',
+          title: `${m.name} (@${m.handle})`,
+          desc: `${m.role} · ${m.team_track.toUpperCase()}`,
+          action: () => {
+            openSendFeedbackModal(m.id);
+          }
+        });
+      });
+    }
+
+    if (currentItems.length === 0) {
+      resultsContainer.innerHTML = `
+        <div style="padding: 24px; text-align: center; color: var(--text-muted); font-size: 13px;">
+          No matching items found for "${escapeHtml(q)}".
+        </div>
+      `;
+      return;
+    }
+
+    if (selectedIndex >= currentItems.length) selectedIndex = 0;
+
+    currentItems.forEach((item, idx) => {
+      const el = document.createElement('div');
+      el.className = `palette-item ${idx === selectedIndex ? 'selected' : ''}`;
+      el.innerHTML = `
+        <div class="palette-item-left">
+          <span style="font-size: 16px;">${item.icon}</span>
+          <div>
+            <div style="font-weight: 500; color: var(--text-primary); font-size: 13.5px;">${escapeHtml(item.title)}</div>
+            <div style="font-size: 11.5px; color: var(--text-muted);">${escapeHtml(item.desc)}</div>
+          </div>
+        </div>
+        <span class="palette-tag">${item.type.toUpperCase()}</span>
+      `;
+
+      el.addEventListener('click', () => {
+        closePalette();
+        item.action();
+      });
+
+      el.addEventListener('mouseenter', () => {
+        selectedIndex = idx;
+        updateHighlight();
+      });
+
+      resultsContainer.appendChild(el);
+    });
+  }
+
+  function updateHighlight() {
+    const items = resultsContainer.querySelectorAll('.palette-item');
+    items.forEach((item, idx) => {
+      item.classList.toggle('selected', idx === selectedIndex);
+      if (idx === selectedIndex) {
+        item.scrollIntoView({ block: 'nearest' });
+      }
+    });
+  }
+
+  input.addEventListener('input', (e) => {
+    selectedIndex = 0;
+    renderResults(e.target.value);
+  });
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (currentItems.length > 0) {
+        selectedIndex = (selectedIndex + 1) % currentItems.length;
+        updateHighlight();
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (currentItems.length > 0) {
+        selectedIndex = (selectedIndex - 1 + currentItems.length) % currentItems.length;
+        updateHighlight();
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (currentItems[selectedIndex]) {
+        closePalette();
+        currentItems[selectedIndex].action();
+      }
+    } else if (e.key === 'Escape') {
+      closePalette();
+    }
+  });
+}
+
+// -------------------------------------------------------------
+// TASK REVISION & ACTIVITY INSPECTOR MODAL
+// -------------------------------------------------------------
+function openTaskRevisionInspector(task) {
+  const modal = document.getElementById('modal-task-history');
+  if (!modal) return;
+
+  const titleEl = document.getElementById('task-history-title');
+  const subtitleEl = document.getElementById('task-history-subtitle');
+  const bodyEl = document.getElementById('task-history-body');
+
+  if (titleEl) titleEl.textContent = `Revision Inspector: ${task.title}`;
+  if (subtitleEl) subtitleEl.textContent = `Task #${task.id} · Track: ${task.track.toUpperCase()} · Status: ${task.status} · OCC Lock: v${task.version}`;
+
+  const taskIdStr = String(task.id);
+  const relevantEvents = (state.auditEvents || []).filter(e => {
+    return (e.target && (e.target === `task_${taskIdStr}` || e.target.includes(`task_${taskIdStr}`) || e.target.includes(taskIdStr))) ||
+           (e.details && (e.details.includes(task.title) || e.details.includes(`Task #${task.id}`)));
+  });
+
+  let deliverableSection = '';
+  if (task.deliverable_url || task.deliverable_notes) {
+    deliverableSection = `
+      <div style="background: rgba(66, 133, 244, 0.08); border: 1px solid rgba(66, 133, 244, 0.25); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px;">
+        <div style="font-size: 11.5px; font-weight: 600; text-transform: uppercase; color: var(--google-blue); margin-bottom: 6px; letter-spacing: 0.5px;">Submitted Deliverable & Context</div>
+        ${task.deliverable_url ? `<div style="font-size: 13px; margin-bottom: 4px;"><strong>Link:</strong> <a href="${task.deliverable_url}" target="_blank" style="color: var(--google-blue); text-decoration: underline;">${task.deliverable_url} ↗</a></div>` : ''}
+        ${task.deliverable_notes ? `<div style="font-size: 12.5px; color: var(--text-secondary); line-height: 1.4;"><strong>Notes:</strong> ${escapeHtml(task.deliverable_notes)}</div>` : ''}
+      </div>
+    `;
+  }
+
+  let timelineHtml = '';
+  if (relevantEvents.length > 0) {
+    timelineHtml = relevantEvents.map(ev => {
+      const timeStr = new Date(ev.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      return `
+        <div style="display: flex; gap: 12px; margin-bottom: 14px; position: relative;">
+          <div style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-surface-elevated); border: 2px solid var(--google-blue); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; flex-shrink: 0; z-index: 1;">
+            ✓
+          </div>
+          <div style="flex: 1; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-weight: 600; font-size: 13px; color: var(--text-primary);">${escapeHtml(ev.action)}</span>
+              <span style="font-size: 11px; color: var(--text-muted);">${timeStr}</span>
+            </div>
+            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 2px;">
+              By: <strong>@${escapeHtml(ev.actor_handle)}</strong> (${escapeHtml(ev.actor_name || 'Team Member')})
+            </div>
+            ${ev.details ? `<div style="font-size: 12px; color: var(--text-muted); font-family: var(--font-mono); background: var(--bg-canvas); padding: 4px 8px; border-radius: 4px; margin-top: 4px;">${escapeHtml(ev.details)}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  } else {
+    timelineHtml = `
+      <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+        <div style="width: 24px; height: 24px; border-radius: 50%; background: rgba(52, 168, 83, 0.15); color: var(--google-green); display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0;">✓</div>
+        <div style="flex: 1; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px 12px;">
+          <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 600;">
+            <span>Current Active Revision (v${task.version})</span>
+            <span class="status-pill ${task.status === 'COMPLETED' ? 'pill-green' : 'pill-purple'}">${task.status}</span>
+          </div>
+          <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+            Assigned to: <strong>${task.assignee_name || 'Unassigned'}</strong> · Track: <strong>${task.track.toUpperCase()}</strong>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+        <div style="width: 24px; height: 24px; border-radius: 50%; background: rgba(66, 133, 244, 0.15); color: var(--google-blue); display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0;">•</div>
+        <div style="flex: 1; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px 12px;">
+          <div style="font-size: 13px; font-weight: 600;">Initial Task Creation (v1)</div>
+          <div style="font-size: 12px; color: var(--text-secondary); margin-top: 4px;">
+            Target deadline set to <strong>${task.deadline || 'Sprint 1 milestone'}</strong>. Optimistic concurrency check initialized.
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  bodyEl.innerHTML = `
+    <div style="margin-bottom: 14px;">
+      <div style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">${escapeHtml(task.description || 'No detailed description recorded.')}</div>
+    </div>
+    ${deliverableSection}
+    <div style="font-size: 12px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); margin-bottom: 10px; letter-spacing: 0.5px;">Activity &amp; Revision Log</div>
+    <div style="position: relative;">
+      ${timelineHtml}
+    </div>
+  `;
+
+  modal.showModal();
+}
+
+// -------------------------------------------------------------
+// PROJECT EXPORT & REPORT GENERATOR (JSON / CSV)
+// -------------------------------------------------------------
+function exportSprintReportJSON() {
+  const completed = (state.tasks || []).filter(t => t.status === 'COMPLETED').length;
+  const inProgress = (state.tasks || []).filter(t => t.status === 'IN_PROGRESS').length;
+  const todo = (state.tasks || []).filter(t => t.status === 'TODO').length;
+  const total = (state.tasks || []).length;
+  const completionRate = total > 0 ? `${Math.round((completed / total) * 100)}%` : '0%';
+
+  const report = {
+    platform: "Frontier AI Engineering Workspace",
+    export_generated_at: new Date().toISOString(),
+    sprint_info: {
+      sprint_number: 1,
+      sprint_title: "Sprint 1: Core Platform Deliverables & Modular Routing",
+      completion_rate: completionRate,
+      tasks_summary: { total, completed, inProgress, todo }
+    },
+    team_roster: (state.members || []).map(m => ({
+      id: m.id,
+      name: m.name,
+      role: m.role,
+      track: m.team_track,
+      handle: m.handle,
+      email: m.email,
+      is_lead: !!m.is_host
+    })),
+    sprint_tasks_and_deliverables: (state.tasks || []).map(t => ({
+      id: t.id,
+      title: t.title,
+      description: t.description,
+      track: t.track,
+      status: t.status,
+      assignee_name: t.assignee_name,
+      target_deadline: t.deadline,
+      version: t.version,
+      deliverable_url: t.deliverable_url || null,
+      deliverable_notes: t.deliverable_notes || null
+    })),
+    peer_review_evaluation: {
+      session_title: state.votingSession?.session?.title || "Sprint Contribution & Team Collaboration",
+      metric: "Sprint Contribution & Team Collaboration (1–5 Stars)",
+      total_evaluations_cast: state.votingSession?.totalBallots || 0,
+      candidates_standings: state.votingSession?.candidates || []
+    },
+    sprint_deliverable_sign_offs: (state.tickets || []).map(ticket => ({
+      id: ticket.id,
+      title: ticket.title,
+      scope: ticket.scope,
+      status: ticket.status,
+      requester_name: ticket.requester_name,
+      approver_name: ticket.approver_name || "Pending Sign-Off",
+      justification: ticket.reason,
+      created_at: ticket.created_at
+    })),
+    scheduled_meeting_logs: (state.calendarEvents || []).map(ev => ({
+      id: ev.id,
+      title: ev.title,
+      date: ev.event_date,
+      time: ev.time_label,
+      type: ev.event_type,
+      bridge: ev.slot_name || "Google Meet Bridge"
+    })),
+    recent_activity_audit: (state.auditEvents || []).slice(0, 50)
+  };
+
+  const jsonStr = JSON.stringify(report, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `frontier_sprint_report_${new Date().toISOString().slice(0, 10)}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  const terminal = document.getElementById('backup-terminal-output');
+  if (terminal) {
+    terminal.innerHTML = `
+<code>
+[SPRINT REPORT JSON EXPORT COMPLETE]
+Timestamp:       ${new Date().toLocaleTimeString()}
+Deliverables:    ${completed} completed / ${total} total (${completionRate})
+Roster Members:  ${(state.members || []).length}
+Peer Standings:  ${state.votingSession?.candidates?.length || 0} candidates scored
+Sign-Offs:       ${(state.tickets || []).length} recorded
+File:            frontier_sprint_report_${new Date().toISOString().slice(0, 10)}.json
+</code>
+    `;
+  }
+
+  showToast('Sprint Report JSON downloaded successfully!');
+}
+
+function exportDeliverablesCSV() {
+  if (!state.tasks || state.tasks.length === 0) {
+    showToast('No tasks available to export', true);
+    return;
+  }
+
+  const headers = ["Task ID", "Title", "Track", "Assignee", "Status", "Deadline", "Deliverable URL", "Deliverable Notes", "Version"];
+  const rows = state.tasks.map(t => [
+    t.id,
+    `"${(t.title || '').replace(/"/g, '""')}"`,
+    `"${(t.track || '').toUpperCase()}"`,
+    `"${(t.assignee_name || 'Unassigned').replace(/"/g, '""')}"`,
+    `"${t.status}"`,
+    `"${t.deadline || 'Flexible'}"`,
+    `"${(t.deliverable_url || '').replace(/"/g, '""')}"`,
+    `"${(t.deliverable_notes || '').replace(/"/g, '""')}"`,
+    t.version || 1
+  ]);
+
+  const csvContent = [headers.join(','), ...rows.map(r => r.join(','))].join('\n');
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `frontier_sprint_deliverables_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.click();
+  URL.revokeObjectURL(url);
+
+  const terminal = document.getElementById('backup-terminal-output');
+  if (terminal) {
+    terminal.innerHTML = `
+<code>
+[DELIVERABLES CSV EXPORT COMPLETE]
+Timestamp:       ${new Date().toLocaleTimeString()}
+Rows Exported:   ${state.tasks.length} task deliverables
+Columns:         ${headers.join(' | ')}
+File:            frontier_sprint_deliverables_${new Date().toISOString().slice(0, 10)}.csv
+</code>
+    `;
+  }
+
+  showToast('Deliverables CSV downloaded successfully!');
 }
 
 function setupEventListeners() {
@@ -2733,6 +3143,10 @@ function setupEventListeners() {
   document.getElementById('btn-host-reopen-voting')?.addEventListener('click', hostReopenVotingSession);
   document.getElementById('btn-refresh-audit')?.addEventListener('click', loadAuditTrail);
   document.getElementById('btn-trigger-backup-snap')?.addEventListener('click', triggerDisasterBackup);
+
+  // Sprint Report & Deliverable Exports
+  document.getElementById('btn-export-sprint-report-json')?.addEventListener('click', exportSprintReportJSON);
+  document.getElementById('btn-export-deliverables-csv')?.addEventListener('click', exportDeliverablesCSV);
 
   // Client data exports
   document.getElementById('btn-export-tasks-json')?.addEventListener('click', () => {
