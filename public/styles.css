@@ -3301,16 +3301,25 @@ body {
   font-size: 14px;
 }
 
-.palette-esc-kbd {
-  padding: 3px 8px;
+.palette-esc-btn, .palette-esc-kbd {
+  padding: 4px 9px;
   border-radius: 6px;
-  background: rgba(255, 255, 255, 0.06);
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.16);
   font-size: 11px;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text-secondary);
   cursor: pointer;
   font-family: var(--font-mono);
+  outline: none;
+  transition: all 0.15s ease;
+  line-height: 1;
+}
+
+.palette-esc-btn:hover, .palette-esc-kbd:hover {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.35);
 }
 
 .palette-results-list {
@@ -4041,11 +4050,38 @@ body {
   min-width: 0;
 }
 
-.rank-medal {
-  font-size: 16px;
+.rank-badge {
   width: 24px;
-  text-align: center;
+  height: 24px;
+  border-radius: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-default);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
   flex-shrink: 0;
+  font-family: var(--font-mono);
+}
+
+.rank-badge.rank-1 {
+  background: rgba(251, 188, 4, 0.12);
+  border-color: rgba(251, 188, 4, 0.4);
+  color: #fbbc04;
+}
+
+.rank-badge.rank-2 {
+  background: rgba(168, 199, 250, 0.12);
+  border-color: rgba(168, 199, 250, 0.4);
+  color: #8ab4f8;
+}
+
+.rank-badge.rank-3 {
+  background: rgba(52, 168, 83, 0.12);
+  border-color: rgba(52, 168, 83, 0.4);
+  color: #81c995;
 }
 
 .rank-cand-name {

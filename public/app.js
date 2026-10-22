@@ -493,7 +493,7 @@ function populatePersonaDropdown() {
         <div class="persona-opt-name">${state.currentUser.name} ${state.currentUser.is_host ? '<span class="host-pill-tag">LEAD</span>' : '<span class="nav-badge">MEMBER</span>'}</div>
         <div class="persona-opt-sub">${state.currentUser.role} • ${state.currentUser.email || '@' + state.currentUser.handle}</div>
       </div>
-      <span class="persona-check">✓</span>
+      <span class="persona-check"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg></span>
     `;
     container.appendChild(row);
   }
@@ -619,7 +619,7 @@ function renderPersonalDashboard() {
 
         row.innerHTML = `
           <div style="flex: 1; cursor: pointer;" class="btn-inspect-task">
-            <div class="compact-task-title">${task.title} <span style="font-size:11px; color:var(--google-blue); margin-left:6px;">(v${task.version || 1}) 🔍</span></div>
+            <div class="compact-task-title">${task.title} <span style="font-size:11px; color:var(--google-blue); margin-left:6px;">(v${task.version || 1})</span></div>
             <div class="compact-task-assignee">Target Date: <strong>${task.deadline || 'Flexible'}</strong> · Status: <strong>${task.status}</strong></div>
             ${hasDeliverable ? `<div style="margin-top:4px;"><a href="${task.deliverable_url}" target="_blank" class="deliverable-link">Deliverable: ${task.deliverable_url}</a></div>` : ''}
           </div>
@@ -1046,7 +1046,7 @@ function createKanbanCard(task) {
   card.innerHTML = `
     <div class="card-top-bar">
       <span class="track-badge track-${task.track}">${task.track.toUpperCase()}</span>
-      <span class="occ-version-pill btn-inspect-task" style="cursor: pointer;" title="Click to inspect task version history and audit trail">v${task.version} · Due: ${task.deadline || 'Flexible'} 🔍</span>
+      <span class="occ-version-pill btn-inspect-task" style="cursor: pointer;" title="Click to inspect task version history and audit trail">v${task.version} · Due: ${task.deadline || 'Flexible'}</span>
     </div>
     
     <div class="kanban-card-body btn-inspect-task" style="cursor: pointer;" title="Click to inspect task history & revisions">
@@ -1293,7 +1293,7 @@ function renderVotingSession() {
           </div>
           <div class="cand-sub">${escapeHtml(candRole)} · Track: ${escapeHtml(candTrack.toUpperCase())}</div>
         </div>
-        <div class="cand-check-circle">${isDefaultSelected ? '✓' : ''}</div>
+        <div class="cand-check-circle">${isDefaultSelected ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>' : ''}</div>
       `;
 
       if (!isSelf) {
@@ -1302,12 +1302,12 @@ function renderVotingSession() {
             c.classList.remove('selected');
             c.setAttribute('aria-checked', 'false');
             const check = c.querySelector('.cand-check-circle');
-            if (check) check.textContent = '';
+            if (check) check.innerHTML = '';
           });
           card.classList.add('selected');
           card.setAttribute('aria-checked', 'true');
           const check = card.querySelector('.cand-check-circle');
-          if (check) check.textContent = '✓';
+          if (check) check.innerHTML = '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><polyline points="20 6 9 17 4 12"></polyline></svg>';
         });
       }
 
@@ -1329,11 +1329,11 @@ function initStarRatingSelector() {
   const explainer = document.getElementById('rating-score-explainer');
 
   const ratingMetadata = {
-    1: { label: '1 / 5 ★ (Needs Significant Improvement)', text: 'Critical sprint milestones missed; low communication or frequent blocking issues.' },
-    2: { label: '2 / 5 ★ (Fair Progress)', text: 'Met basic sprint tasks with substantial assistance; opportunity to grow autonomy.' },
-    3: { label: '3 / 5 ★ (Good & Reliable)', text: 'Dependably delivered sprint deliverables on schedule with solid engineering quality.' },
-    4: { label: '4 / 5 ★ (Very Good Impact)', text: 'High velocity, proactive PR reviews, and consistently assisted peers with roadblocks.' },
-    5: { label: '5 / 5 ★ (Outstanding Impact)', text: 'Exceptional sprint velocity, architecture leadership, and proactive peer support.' }
+    1: { label: '1.0 / 5.0 (Needs Significant Improvement)', text: 'Critical sprint milestones missed; low communication or frequent blocking issues.' },
+    2: { label: '2.0 / 5.0 (Fair Progress)', text: 'Met basic sprint tasks with substantial assistance; opportunity to grow autonomy.' },
+    3: { label: '3.0 / 5.0 (Good & Reliable)', text: 'Dependably delivered sprint deliverables on schedule with solid engineering quality.' },
+    4: { label: '4.0 / 5.0 (Very Good Impact)', text: 'High velocity, proactive PR reviews, and consistently assisted peers with roadblocks.' },
+    5: { label: '5.0 / 5.0 (Outstanding Impact)', text: 'Exceptional sprint velocity, architecture leadership, and proactive peer support.' }
   };
 
   function updateVisuals(rating) {
@@ -1414,19 +1414,17 @@ function renderTallyMeters(tally, candidatesList = []) {
     return (b.avg_rating || 0) - (a.avg_rating || 0);
   });
 
-  const medals = ['🥇', '🥈', '🥉'];
-
   list.forEach((item, idx) => {
     const avgScore = item.avg_rating || 0;
     const count = item.total_ratings || item.votes || 0;
     const scorePct = Math.round((avgScore / 5) * 100);
-    const medal = idx < 3 ? medals[idx] : `<span style="font-size: 11px; color: var(--text-muted); font-weight:700;">#${idx + 1}</span>`;
+    const rankBadge = `<div class="rank-badge rank-${idx + 1}">#${idx + 1}</div>`;
 
     const card = document.createElement('div');
     card.className = 'standings-rank-card';
     card.innerHTML = `
       <div class="rank-card-left">
-        <div class="rank-medal">${medal}</div>
+        ${rankBadge}
         <div style="min-width: 0;">
           <div class="rank-cand-name">${escapeHtml(item.candidate_name || item.label || 'Teammate')}</div>
           <div class="rank-cand-role">${escapeHtml(item.candidate_role || 'Engineering Member')}</div>
@@ -1437,7 +1435,7 @@ function renderTallyMeters(tally, candidatesList = []) {
       </div>
       <div class="rank-card-right">
         <div class="rank-score-pill">
-          <span>★</span>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="#fbbc04" style="margin-right:2px;"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></svg>
           <span>${avgScore > 0 ? avgScore.toFixed(1) : '—'}</span>
         </div>
         <div class="rank-review-count">${count} ${count === 1 ? 'evaluation' : 'evaluations'}</div>
@@ -1532,7 +1530,7 @@ async function castAnonymousBallot(e) {
     if (completedBox) completedBox.classList.remove('hidden');
 
     const candName = selected.dataset.candidateName || 'Teammate';
-    showToast(`Anonymous evaluation of ${rating}/5 ★ for ${candName} recorded!`);
+    showToast(`Anonymous evaluation of ${rating}/5.0 stars for ${candName} recorded.`);
     await loadVotingSession();
     await loadPersonalDashboard();
   } catch (err) {
@@ -2670,11 +2668,11 @@ function renderTasklets() {
     targetFbContainer.innerHTML = '';
 
     const categoryIcons = {
-      KUDOS: '🌟 Kudos',
-      COLLABORATION: '🤝 Team Collaboration',
-      CODE_QUALITY: '💻 Code Quality',
-      SUGGESTION: '💡 Suggestion',
-      GENERAL: '💬 Peer Note'
+      KUDOS: 'Kudos',
+      COLLABORATION: 'Collaboration',
+      CODE_QUALITY: 'Code Quality',
+      SUGGESTION: 'Suggestion',
+      GENERAL: 'Peer Note'
     };
 
     if (fbList.length === 0) {
@@ -2688,7 +2686,7 @@ function renderTasklets() {
         const card = document.createElement('div');
         card.className = 'tasklet-card';
         card.style.borderLeft = '3px solid var(--google-blue)';
-        const catLabel = categoryIcons[fb.category] || '💬 Feedback';
+        const catLabel = categoryIcons[fb.category] || 'Feedback';
         const senderLabel = isFbReceived
           ? (fb.is_anonymous ? 'Anonymous Teammate' : (fb.sender_name || 'Teammate'))
           : `To: ${fb.receiver_name || 'Teammate'}${fb.is_anonymous ? ' (Sent Anonymously)' : ''}`;
@@ -2852,45 +2850,121 @@ function setupCommandPalette() {
   const closePalette = () => {
     try {
       if (modal.open) modal.close();
-    } catch (err) {
-      modal.removeAttribute('open');
-    }
+    } catch (err) {}
+    modal.removeAttribute('open');
   };
 
-  escBtn?.addEventListener('click', closePalette);
+  if (escBtn) {
+    escBtn.onclick = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closePalette();
+    };
+  }
 
-  // Keyboard shortcut: Ctrl+K or Cmd+K toggles palette
-  document.addEventListener('keydown', (e) => {
+  // Keyboard shortcuts:
+  // 1. Ctrl+K or Cmd+K toggles palette
+  // 2. Escape closes palette unconditionally at window level
+  window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
-      if (modal.open) {
+      if (modal.open || modal.hasAttribute('open')) {
         closePalette();
       } else {
         openCommandPalette();
       }
+    } else if (e.key === 'Escape') {
+      if (modal.open || modal.hasAttribute('open')) {
+        e.preventDefault();
+        e.stopPropagation();
+        closePalette();
+      }
     }
+  }, true);
+
+  modal.addEventListener('cancel', (e) => {
+    e.preventDefault();
+    closePalette();
   });
 
   // Clicking backdrop closes palette
   modal.addEventListener('click', (e) => {
-    const rect = modal.getBoundingClientRect();
-    const isInDialog = (
-      rect.top <= e.clientY && e.clientY <= rect.top + rect.height &&
-      rect.left <= e.clientX && e.clientX <= rect.left + rect.width
-    );
-    if (!isInDialog) closePalette();
+    if (e.target === modal) closePalette();
   });
 
   const baseCommands = [
-    { type: 'command', tagClass: 'tag-cmd', icon: '📋', title: '/tasks', desc: 'Jump to Kanban Sprint Board', action: () => { switchView('view-tasks'); document.getElementById('tab-tasks-all')?.click(); } },
-    { type: 'command', tagClass: 'tag-cmd', icon: '👤', title: '/mine', desc: 'Jump to Assigned to Me (Personal Checklist)', action: () => { switchView('view-tasks'); document.getElementById('tab-tasks-mine')?.click(); } },
-    { type: 'command', tagClass: 'tag-cmd', icon: '📞', title: '/call', desc: 'Open Google Meet Call Room & Bridges', action: () => switchView('view-callroom') },
-    { type: 'command', tagClass: 'tag-cmd', icon: '⭐', title: '/vote', desc: 'Jump to 1–5 Star Anonymous Peer Review', action: () => switchView('view-voting') },
-    { type: 'command', tagClass: 'tag-cmd', icon: '🤝', title: '/peers', desc: 'Open Multipurpose Peers & Feedback Hub', action: () => switchView('view-peers') },
-    { type: 'command', tagClass: 'tag-cmd', icon: '🛡️', title: '/signoff', desc: 'Sprint Deliverable Sign-Off & Approvals', action: () => { switchView('view-settings'); document.querySelector('#settings-subtabs [data-subtab="permissions"]')?.click(); } },
-    { type: 'command', tagClass: 'tag-cmd', icon: '📊', title: '/export', desc: 'Project Export & Report Generator (JSON/CSV)', action: () => { switchView('view-settings'); document.querySelector('#settings-subtabs [data-subtab="snapshot"]')?.click(); } },
-    { type: 'command', tagClass: 'tag-cmd', icon: '✦', title: '/oracle', desc: 'Consult Oracle AI Assistant', action: () => switchView('view-oracle') },
-    { type: 'command', tagClass: 'tag-cmd', icon: '🚪', title: '/signout', desc: 'Sign out of current account', action: () => document.getElementById('btn-header-signout')?.click() }
+    {
+      type: 'command',
+      tagClass: 'tag-cmd',
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"></path><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"></path></svg>',
+      title: '/tasks',
+      desc: 'Jump to Kanban Sprint Board',
+      action: () => { switchView('view-tasks'); document.getElementById('tab-tasks-all')?.click(); }
+    },
+    {
+      type: 'command',
+      tagClass: 'tag-cmd',
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>',
+      title: '/mine',
+      desc: 'Jump to Assigned to Me (Personal Checklist)',
+      action: () => { switchView('view-tasks'); document.getElementById('tab-tasks-mine')?.click(); }
+    },
+    {
+      type: 'command',
+      tagClass: 'tag-cmd',
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="23 7 16 12 23 17 23 7"></polygon><rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect></svg>',
+      title: '/call',
+      desc: 'Open Google Meet Call Room & Bridges',
+      action: () => switchView('view-callroom')
+    },
+    {
+      type: 'command',
+      tagClass: 'tag-cmd',
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"></polygon></svg>',
+      title: '/vote',
+      desc: 'Jump to 1–5 Star Anonymous Peer Review',
+      action: () => switchView('view-voting')
+    },
+    {
+      type: 'command',
+      tagClass: 'tag-cmd',
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>',
+      title: '/peers',
+      desc: 'Open Multipurpose Peers & Feedback Hub',
+      action: () => switchView('view-peers')
+    },
+    {
+      type: 'command',
+      tagClass: 'tag-cmd',
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>',
+      title: '/signoff',
+      desc: 'Sprint Deliverable Sign-Off & Approvals',
+      action: () => { switchView('view-settings'); document.querySelector('#settings-subtabs [data-subtab="permissions"]')?.click(); }
+    },
+    {
+      type: 'command',
+      tagClass: 'tag-cmd',
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>',
+      title: '/export',
+      desc: 'Project Export & Report Generator (JSON/CSV)',
+      action: () => { switchView('view-settings'); document.querySelector('#settings-subtabs [data-subtab="snapshot"]')?.click(); }
+    },
+    {
+      type: 'command',
+      tagClass: 'tag-cmd',
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>',
+      title: '/oracle',
+      desc: 'Consult Oracle AI Assistant',
+      action: () => switchView('view-oracle')
+    },
+    {
+      type: 'command',
+      tagClass: 'tag-cmd',
+      icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"></path><polyline points="16 17 21 12 16 7"></polyline><line x1="21" y1="12" x2="9" y2="12"></line></svg>',
+      title: '/signout',
+      desc: 'Sign out of current account',
+      action: () => document.getElementById('btn-header-signout')?.click()
+    }
   ];
 
   function renderResults(query) {
@@ -2909,7 +2983,7 @@ function setupCommandPalette() {
       ).slice(0, 4).map(t => ({
         type: 'task',
         tagClass: 'tag-task',
-        icon: '📌',
+        icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line></svg>',
         title: t.title,
         desc: `Track: ${(t.track || 'Core').toUpperCase()} · Status: ${t.status} · Due: ${t.deadline || 'Flexible'}`,
         action: () => {
@@ -2929,7 +3003,7 @@ function setupCommandPalette() {
       ).slice(0, 4).map(m => ({
         type: 'member',
         tagClass: 'tag-peer',
-        icon: '🧑‍💻',
+        icon: '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>',
         title: `${m.name} (@${m.handle})`,
         desc: `${m.role} · ${(m.team_track || 'General').toUpperCase()}`,
         action: () => {
@@ -2953,8 +3027,8 @@ function setupCommandPalette() {
     if (categories.length === 0) {
       resultsContainer.innerHTML = `
         <div style="padding: 32px 16px; text-align: center; color: var(--text-muted); font-size: 13.5px;">
-          <div style="font-size: 24px; margin-bottom: 8px;">🔍</div>
-          No matching commands, tasks, or teammates found for "${escapeHtml(q)}".
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-bottom: 8px; opacity: 0.6;"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          <div>No matching commands, tasks, or teammates found for "${escapeHtml(q)}".</div>
         </div>
       `;
       return;
@@ -3084,8 +3158,8 @@ function openTaskRevisionInspector(task) {
       const timeStr = new Date(ev.timestamp).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
       return `
         <div style="display: flex; gap: 12px; margin-bottom: 14px; position: relative;">
-          <div style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-surface-elevated); border: 2px solid var(--google-blue); display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: bold; flex-shrink: 0; z-index: 1;">
-            ✓
+          <div style="width: 24px; height: 24px; border-radius: 50%; background: var(--bg-surface-elevated); border: 2px solid var(--google-blue); display: flex; align-items: center; justify-content: center; color: var(--google-blue); flex-shrink: 0; z-index: 1;">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
           </div>
           <div style="flex: 1; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px 12px;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
@@ -3103,7 +3177,9 @@ function openTaskRevisionInspector(task) {
   } else {
     timelineHtml = `
       <div style="display: flex; gap: 12px; margin-bottom: 12px;">
-        <div style="width: 24px; height: 24px; border-radius: 50%; background: rgba(52, 168, 83, 0.15); color: var(--google-green); display: flex; align-items: center; justify-content: center; font-size: 11px; flex-shrink: 0;">✓</div>
+        <div style="width: 24px; height: 24px; border-radius: 50%; background: rgba(52, 168, 83, 0.15); color: var(--google-green); display: flex; align-items: center; justify-content: center; flex-shrink: 0;">
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+        </div>
         <div style="flex: 1; background: var(--bg-surface); border: 1px solid var(--border-subtle); border-radius: 6px; padding: 10px 12px;">
           <div style="display: flex; justify-content: space-between; font-size: 13px; font-weight: 600;">
             <span>Current Active Revision (v${task.version})</span>
@@ -3408,7 +3484,9 @@ function appendOracleBubble(senderRole, content) {
   if (!msgBox) return;
 
   const isModel = senderRole === 'model';
-  const avatar = isModel ? '✦' : (state.currentUser ? getInitials(state.currentUser.name) : 'ME');
+  const avatar = isModel
+    ? `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>`
+    : (state.currentUser ? getInitials(state.currentUser.name) : 'ME');
   const roleClass = isModel ? 'oracle-bubble-model' : 'oracle-bubble-user';
 
   const bubble = document.createElement('div');
@@ -3464,7 +3542,9 @@ async function sendOracleMessage(userText) {
   loadingBubble.className = 'oracle-bubble oracle-bubble-model';
   loadingBubble.id = 'oracle-thinking-bubble';
   loadingBubble.innerHTML = `
-    <div class="oracle-bubble-avatar">✦</div>
+    <div class="oracle-bubble-avatar">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>
+    </div>
     <div class="oracle-bubble-content" style="color: var(--google-blue); font-style: italic;">
       Consulting workspace memory...
     </div>
@@ -3486,7 +3566,7 @@ async function sendOracleMessage(userText) {
 
     if (!res.ok) {
       const errData = await res.json().catch(() => ({}));
-      appendOracleBubble('model', `⚠️ Error: ${errData.error || 'Failed to retrieve answer from Oracle.'}`);
+      appendOracleBubble('model', `Error: ${errData.error || 'Failed to retrieve answer from Oracle.'}`);
       return;
     }
 
@@ -3500,7 +3580,7 @@ async function sendOracleMessage(userText) {
     await loadOracleThreads();
   } catch (err) {
     loadingBubble.remove();
-    appendOracleBubble('model', '⚠️ Network connection error when reaching Oracle.');
+    appendOracleBubble('model', 'Network connection error when reaching Oracle.');
   }
 }
 
@@ -3532,9 +3612,11 @@ function setupOracleListeners() {
     if (msgBox) {
       msgBox.innerHTML = `
         <div class="oracle-bubble oracle-bubble-model">
-          <div class="oracle-bubble-avatar">✦</div>
+          <div class="oracle-bubble-avatar">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2L14.5 9.5L22 12L14.5 14.5L12 22L9.5 14.5L2 12L9.5 9.5L12 2Z"/></svg>
+          </div>
           <div class="oracle-bubble-content">
-            <p>👋 Started a new conversation!</p>
+            <p>Started a new conversation.</p>
             <p>Ask anything about current sprint tasks, deadlines, meeting slots, or team assignments.</p>
           </div>
         </div>
