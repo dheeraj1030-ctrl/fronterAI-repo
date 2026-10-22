@@ -61,6 +61,26 @@ async function ensureSchema(env) {
   try {
     await env.DB.prepare('ALTER TABLE members ADD COLUMN email TEXT').run();
   } catch (e) {}
+
+  try {
+    await env.DB.prepare('ALTER TABLE ballots ADD COLUMN rating INTEGER DEFAULT 5').run();
+  } catch (e) {}
+
+  try {
+    await env.DB.prepare('ALTER TABLE ballots ADD COLUMN candidate_member_id INTEGER').run();
+  } catch (e) {}
+
+  try {
+    await env.DB.prepare("ALTER TABLE tasklets ADD COLUMN type TEXT DEFAULT 'TASKLET'").run();
+  } catch (e) {}
+
+  try {
+    await env.DB.prepare("ALTER TABLE tasklets ADD COLUMN category TEXT DEFAULT 'GENERAL'").run();
+  } catch (e) {}
+
+  try {
+    await env.DB.prepare('ALTER TABLE tasklets ADD COLUMN is_anonymous INTEGER DEFAULT 0').run();
+  } catch (e) {}
 }
 
 async function getAuthMember(request, env) {
@@ -546,7 +566,7 @@ export async function onRequest(context) {
     }
 
     // --------------------------------------------------------------------------
-    // 8. CRYPTOGRAPHIC BLIND PEER REVIEW (VOTING)
+    // 8. CRYPTOGRAPHIC BLIND PEER REVIEW (1-5 RATING SCALE)
     // --------------------------------------------------------------------------
     if ((pathname === '/api/voting/current' || pathname === '/api/voting/sessions') && method === 'GET') {
       const member = await getAuthMember(request, env);
@@ -556,13 +576,10 @@ export async function onRequest(context) {
       if (!session) return jsonResponse({ error: 'No voting session found' }, 404);
 
       const allSessionsRes = await env.DB.prepare('SELECT id, title, description, session_type, status FROM voting_sessions ORDER BY id ASC').all();
-      const optionsRes = await env.DB.prepare(`
-        SELECT vo.*, m.name as candidate_name, m.role as candidate_role
-        FROM voting_options vo
-        LEFT JOIN members m ON vo.candidate_member_id = m.id
-        WHERE vo.session_id = ?
-      `).bind(session.id).all();
-      const options = optionsRes.results || [];
+      
+      // All allowlisted members available for peer evaluation
+      const membersRes = await env.DB.prepare('SELECT id, name, role, team_track, email FROM members WHERE is_allowed = 1 ORDER BY id ASC').all();
+      const candidates = membersRes.results || [];
 
       const eligibility = member
         ? await env.DB.prepare('SELECT * FROM voting_eligibility WHERE session_id = ? AND member_id = ?').bind(session.id, member.id).first()
@@ -570,27 +587,52 @@ export async function onRequest(context) {
 
       const ballotsCount = await env.DB.prepare('SELECT COUNT(*) as count FROM ballots WHERE session_id = ?').bind(session.id).first();
       const totalBallots = ballotsCount?.count || 0;
-      const totalEligible = session.total_eligible || 8;
+      const totalEligible = candidates.length || session.total_eligible || 8;
       const isRevealed = totalBallots >= totalEligible || session.status === 'CLOSED';
 
       let tally = null;
       if (isRevealed) {
         tally = [];
-        for (const opt of options) {
-          const vCount = await env.DB.prepare('SELECT COUNT(*) as count FROM ballots WHERE session_id = ? AND option_id = ?').bind(session.id, opt.id).first();
+        for (const cand of candidates) {
+          const stats = await env.DB.prepare(`
+            SELECT 
+              COUNT(*) as count,
+              AVG(rating) as avg_rating,
+              SUM(CASE WHEN rating = 5 THEN 1 ELSE 0 END) as stars_5,
+              SUM(CASE WHEN rating = 4 THEN 1 ELSE 0 END) as stars_4,
+              SUM(CASE WHEN rating = 3 THEN 1 ELSE 0 END) as stars_3,
+              SUM(CASE WHEN rating = 2 THEN 1 ELSE 0 END) as stars_2,
+              SUM(CASE WHEN rating = 1 THEN 1 ELSE 0 END) as stars_1
+            FROM ballots 
+            WHERE session_id = ? AND (candidate_member_id = ? OR option_id = ?)
+          `).bind(session.id, cand.id, cand.id).first();
+
           tally.push({
-            option_id: opt.id,
-            label: opt.label,
-            candidate_name: opt.candidate_name,
-            votes: vCount?.count || 0
+            candidate_id: cand.id,
+            candidate_name: cand.name,
+            candidate_role: cand.role,
+            team_track: cand.team_track,
+            total_ratings: stats?.count || 0,
+            avg_rating: stats?.count ? (Math.round((stats.avg_rating || 0) * 10) / 10) : 0,
+            breakdown: {
+              5: stats?.stars_5 || 0,
+              4: stats?.stars_4 || 0,
+              3: stats?.stars_3 || 0,
+              2: stats?.stars_2 || 0,
+              1: stats?.stars_1 || 0
+            }
           });
         }
       }
 
       return jsonResponse({
-        session,
+        session: {
+          ...session,
+          title: session.title || 'Sprint 1 Peer Review & Contribution Standings',
+          metric: 'Sprint Contribution, Technical Reliability & Team Collaboration'
+        },
         allSessions: allSessionsRes.results || [session],
-        options,
+        candidates,
         userHasClaimedToken: !!eligibility,
         totalBallots,
         totalEligible,
@@ -620,8 +662,10 @@ export async function onRequest(context) {
     }
 
     if (pathname === '/api/voting/cast' && method === 'POST') {
-      const { token, session_id, option_id } = await request.json();
-      if (!token || !session_id || !option_id) return jsonResponse({ error: 'Missing token or ballot payload' }, 400);
+      const { token, session_id, option_id, candidate_id, rating } = await request.json();
+      const targetCandidateId = candidate_id || option_id;
+      const numRating = Math.max(1, Math.min(5, parseInt(rating || 5, 10)));
+      if (!token || !session_id || !targetCandidateId) return jsonResponse({ error: 'Missing token or ballot payload' }, 400);
       const parts = token.split(':');
       if (parts.length !== 3) return jsonResponse({ error: 'Malformed ballot token' }, 400);
       const [tokenSessionId, nonce, providedSig] = parts;
@@ -632,8 +676,8 @@ export async function onRequest(context) {
       const used = await env.DB.prepare('SELECT * FROM used_tokens WHERE token_hash = ?').bind(tokenHash).first();
       if (used) return jsonResponse({ error: 'Double-spending rejected: Token already cast' }, 409);
       await env.DB.prepare("INSERT INTO used_tokens (token_hash, used_at) VALUES (?, datetime('now'))").bind(tokenHash).run();
-      await env.DB.prepare('INSERT INTO ballots (session_id, option_id) VALUES (?, ?)').bind(session_id, option_id).run();
-      await logAudit(env, 'ANONYMOUS_VOTER', 'VOTE_CAST', 'voting', `Anonymous ballot cast in Session #${session_id}`);
+      await env.DB.prepare('INSERT INTO ballots (session_id, option_id, candidate_member_id, rating) VALUES (?, ?, ?, ?)').bind(session_id, targetCandidateId, targetCandidateId, numRating).run();
+      await logAudit(env, 'ANONYMOUS_VOTER', 'VOTE_CAST', 'voting', `Anonymous rating of ${numRating}/5 cast in Session #${session_id}`);
       return jsonResponse({ success: true });
     }
 
@@ -656,27 +700,59 @@ export async function onRequest(context) {
     }
 
     // --------------------------------------------------------------------------
-    // 9. PEER TASKLETS
+    // 9. MULTIPURPOSE PEERS: MICRO-TASKS & PEER FEEDBACK
     // --------------------------------------------------------------------------
     if (pathname === '/api/tasklets' && method === 'GET') {
       const member = await getAuthMember(request, env);
       const memberId = member ? member.id : 1;
-      const res = await env.DB.prepare(`
-        SELECT t.*, s.handle as sender_handle, s.name as sender_name, r.handle as receiver_handle, r.name as receiver_name
-        FROM tasklets t LEFT JOIN members s ON t.sender_id = s.id LEFT JOIN members r ON t.receiver_id = r.id
-        WHERE t.sender_id = ? OR t.receiver_id = ? ORDER BY t.id DESC
-      `).bind(memberId, memberId).all();
-      return jsonResponse({ tasklets: res.results || [] });
+      const filterType = url.searchParams.get('type'); // 'TASKLET' or 'FEEDBACK' or null
+
+      let query = `
+        SELECT t.*, 
+          s.handle as sender_handle, s.name as sender_name, 
+          r.handle as receiver_handle, r.name as receiver_name
+        FROM tasklets t 
+        LEFT JOIN members s ON t.sender_id = s.id 
+        LEFT JOIN members r ON t.receiver_id = r.id
+        WHERE (t.sender_id = ? OR t.receiver_id = ?)
+      `;
+      const params = [memberId, memberId];
+      if (filterType) {
+        query += ' AND (t.type = ? OR (t.type IS NULL AND ? = "TASKLET"))';
+        params.push(filterType, filterType);
+      }
+      query += ' ORDER BY t.id DESC';
+
+      const res = await env.DB.prepare(query).bind(...params).all();
+      
+      // Mask sender for anonymous feedback where recipient is reviewing
+      const items = (res.results || []).map(item => {
+        if (item.is_anonymous && item.receiver_id === memberId && item.sender_id !== memberId) {
+          return {
+            ...item,
+            sender_name: 'Anonymous Teammate',
+            sender_handle: 'anonymous'
+          };
+        }
+        return item;
+      });
+
+      return jsonResponse({ tasklets: items });
     }
 
     if (pathname === '/api/tasklets' && method === 'POST') {
       const member = await getAuthMember(request, env);
       if (!member) return jsonResponse({ error: 'Unauthorized' }, 401);
-      const { receiver_id, title, description } = await request.json();
+      const { receiver_id, title, description, type, category, is_anonymous } = await request.json();
+      const itemType = type || 'TASKLET';
+      const itemCategory = category || (itemType === 'FEEDBACK' ? 'KUDOS' : 'GENERAL');
+      const isAnon = is_anonymous ? 1 : 0;
+
       const res = await env.DB.prepare(
-        "INSERT INTO tasklets (sender_id, receiver_id, title, description, status, created_at, updated_at) VALUES (?, ?, ?, ?, 'PENDING', datetime('now'), datetime('now'))"
-      ).bind(member.id, receiver_id, title, description || '').run();
-      await logAudit(env, member.handle, 'TASKLET_CREATE', 'tasklets', `Sent tasklet "${title}"`);
+        "INSERT INTO tasklets (sender_id, receiver_id, title, description, status, type, category, is_anonymous, created_at, updated_at) VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?, datetime('now'), datetime('now'))"
+      ).bind(member.id, receiver_id, title, description || '', itemType, itemCategory, isAnon).run();
+
+      await logAudit(env, isAnon ? 'ANONYMOUS' : member.handle, itemType === 'FEEDBACK' ? 'FEEDBACK_SHARE' : 'TASKLET_CREATE', 'tasklets', `Sent ${itemType.toLowerCase()} to member #${receiver_id}`);
       return jsonResponse({ success: true, id: res.meta?.last_row_id }, 201);
     }
 

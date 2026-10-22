@@ -67,20 +67,18 @@ async function init() {
   if (params.get('error') === 'oauth_not_configured') {
     authAlert?.classList.remove('hidden');
     if (authAlertText) {
-      authAlertText.innerHTML = `<strong>GitHub OAuth Credentials Not Configured:</strong><br>
-      To enable real GitHub sign-in, register an OAuth App in <a href="https://github.com/settings/developers" target="_blank" style="color:var(--google-blue); text-decoration:underline;">GitHub Developer Settings</a> with callback URL <code>http://localhost:3030/api/auth/github/callback</code> and set <code>GITHUB_CLIENT_ID</code> and <code>GITHUB_CLIENT_SECRET</code> in your <code>.env</code> file.<br><br>
-      <em>Tip: Click the "Simulate OAuth Callback" buttons below to test the verified flow instantly!</em>`;
+      authAlertText.innerHTML = `<strong>Google OAuth Not Configured:</strong><br>
+      Please configure <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> in Cloudflare Worker settings.`;
     }
   } else if (params.get('error') === 'unauthorized_allowlist') {
-    const ghUser = params.get('gh_user') || 'Unknown';
-    const ghId = params.get('gh_id') || 'Unknown';
+    const userEmail = params.get('email') || 'Unknown';
     authAlert?.classList.remove('hidden');
     if (authAlertText) {
       authAlertText.innerHTML = `<strong>403 Access Denied (Strict Allowlist Policy):</strong><br>
-      GitHub account <strong>@${ghUser}</strong> (Numeric ID: <code>${ghId}</code>) successfully authenticated with GitHub, but was <strong>REJECTED</strong>. Only the 8 authorized Frontier AI team members can enter this platform.`;
+      Google account <strong>${userEmail}</strong> was <strong>REJECTED</strong>. Only authorized Frontier AI team members on the allowlist can enter this platform.`;
     }
   } else if (params.get('auth') === 'oauth_success') {
-    showToast('Authenticated via GitHub OAuth 2.0!');
+    showToast('Authenticated via Google OAuth 2.0!');
   }
 
   if (params.has('error') || params.has('auth')) {
@@ -1162,11 +1160,16 @@ function renderVotingSession() {
   document.getElementById('voting-session-summary').textContent = s.session.description;
 
   const ballots = s.totalBallots || 0;
-  const eligible = s.totalEligible || 8;
-  const pct = Math.round((ballots / eligible) * 100);
+  const eligible = s.totalEligible || s.candidates?.length || 8;
+  const pct = Math.min(100, Math.round((ballots / eligible) * 100));
 
-  document.getElementById('stats-ballots-count').textContent = ballots;
-  document.getElementById('stats-ballots-bar').style.width = `${pct}%`;
+  const ballotsCountEl = document.getElementById('stats-ballots-count');
+  const ballotsTotalEl = document.getElementById('stats-ballots-total');
+  const ballotsBarEl = document.getElementById('stats-ballots-bar');
+
+  if (ballotsCountEl) ballotsCountEl.textContent = ballots;
+  if (ballotsTotalEl) ballotsTotalEl.textContent = `/ ${eligible} Evaluated`;
+  if (ballotsBarEl) ballotsBarEl.style.width = `${pct}%`;
 
   const memberName = state.currentUser ? state.currentUser.name : 'Unknown';
   document.getElementById('stepper-member-label').textContent = memberName;
@@ -1190,7 +1193,7 @@ function renderVotingSession() {
     step4.className = 'step-node completed';
     document.getElementById('step-line-3').className = 'stepper-line completed';
     tallyBox.classList.remove('hidden');
-    renderTallyMeters(s.tally || [], ballots);
+    renderTallyMeters(s.tally || []);
 
     claimBox.classList.add('hidden');
     castBox.classList.add('hidden');
@@ -1247,41 +1250,106 @@ function renderVotingSession() {
     }
   }
 
-  // Populate options dynamically
+  // Populate candidate options dynamically
   const choicesContainer = document.getElementById('ballot-options-container');
   choicesContainer.innerHTML = '';
-  (s.options || []).forEach((opt, idx) => {
+  const candidatesList = s.candidates || s.options || [];
+
+  candidatesList.forEach((cand, idx) => {
+    const isSelf = state.currentUser && (state.currentUser.id === cand.id || state.currentUser.id === cand.candidate_member_id);
     const label = document.createElement('label');
-    label.className = 'choice-card-label';
+    label.className = 'choice-card-label' + (isSelf ? ' disabled-choice' : '');
+    if (isSelf) {
+      label.style.opacity = '0.5';
+      label.style.cursor = 'not-allowed';
+    }
+    const val = cand.id || cand.candidate_member_id;
     label.innerHTML = `
-      <input type="radio" name="ballot-choice-opt" value="${opt.id}" ${idx === 0 ? 'checked' : ''}>
-      <div>
-        <span class="choice-text"><strong>${opt.candidate_name || opt.label}</strong></span>
-        ${opt.candidate_name ? `<div style="font-size:12px; color:var(--text-secondary); margin-top:2px;">${opt.label}</div>` : ''}
+      <input type="radio" name="ballot-choice-opt" value="${val}" ${idx === 0 && !isSelf ? 'checked' : ''} ${isSelf ? 'disabled' : ''}>
+      <div style="flex: 1;">
+        <div style="display: flex; justify-content: space-between; align-items: center;">
+          <span class="choice-text"><strong>${cand.name || cand.candidate_name || cand.label}</strong></span>
+          ${isSelf ? '<span style="font-size: 11px; color: var(--text-muted);">(You - cannot self-evaluate)</span>' : ''}
+        </div>
+        <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">${cand.role || cand.candidate_role || 'Engineer'} · Track: ${cand.team_track || 'General'}</div>
       </div>
     `;
     choicesContainer.appendChild(label);
   });
+
+  initStarRatingSelector();
 }
 
-function renderTallyMeters(tally, totalBallots) {
+function initStarRatingSelector() {
+  const ratingButtons = document.querySelectorAll('.rating-star-btn');
+  const hiddenInput = document.getElementById('selected-ballot-rating');
+  const label = document.getElementById('rating-score-label');
+  const descMap = {
+    1: '1 / 5 ★ (Needs Improvement)',
+    2: '2 / 5 ★ (Fair)',
+    3: '3 / 5 ★ (Good)',
+    4: '4 / 5 ★ (Very Good)',
+    5: '5 / 5 ★ (Outstanding)'
+  };
+
+  ratingButtons.forEach(btn => {
+    btn.onclick = () => {
+      const rating = parseInt(btn.dataset.rating, 10);
+      if (hiddenInput) hiddenInput.value = rating;
+      if (label) label.textContent = descMap[rating] || `${rating} / 5 ★`;
+
+      ratingButtons.forEach(b => {
+        const bRating = parseInt(b.dataset.rating, 10);
+        if (bRating <= rating) {
+          b.classList.add('active');
+          b.style.borderColor = 'var(--google-blue)';
+          b.style.background = 'rgba(66,133,244,0.15)';
+          b.style.color = '#fbbc04';
+        } else {
+          b.classList.remove('active');
+          b.style.borderColor = 'var(--border-default)';
+          b.style.background = 'var(--bg-surface)';
+          b.style.color = 'var(--text-primary)';
+        }
+      });
+    };
+  });
+}
+
+function renderTallyMeters(tally) {
   const container = document.getElementById('tally-bars-display');
   container.innerHTML = '';
 
+  if (!tally || tally.length === 0) {
+    container.innerHTML = '<p style="color: var(--text-muted); font-size: 13px;">No evaluation ratings recorded yet.</p>';
+    return;
+  }
+
   tally.forEach(item => {
-    const pct = totalBallots > 0 ? Math.round((item.votes / totalBallots) * 100) : 0;
-    const meter = document.createElement('div');
-    meter.className = 'tally-meter-item';
-    meter.innerHTML = `
-      <div class="tally-meter-labels">
-        <span><strong>${item.candidate_name || item.label}</strong></span>
-        <span>${item.votes} votes (${pct}%)</span>
+    const avgScore = item.avg_rating || 0;
+    const count = item.total_ratings || item.votes || 0;
+    const scorePct = Math.round((avgScore / 5) * 100);
+
+    const card = document.createElement('div');
+    card.className = 'tally-card';
+    card.style = 'background: var(--bg-surface-elevated); padding: 12px 14px; border-radius: 8px; margin-bottom: 12px; border: 1px solid var(--border-subtle);';
+
+    card.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+        <div>
+          <span style="font-weight: 700; font-size: 14px;">${item.candidate_name || item.label}</span>
+          <span style="font-size: 12px; color: var(--text-secondary); margin-left: 8px;">${item.candidate_role || ''}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span style="font-size: 16px; color: #fbbc04; font-weight: 700;">★ ${avgScore > 0 ? avgScore.toFixed(1) : '—'}</span>
+          <span style="font-size: 12px; color: var(--text-muted);">/ 5.0 (${count} ${count === 1 ? 'review' : 'reviews'})</span>
+        </div>
       </div>
-      <div class="tally-meter-track">
-        <div class="tally-meter-fill" style="width: ${pct}%;"></div>
+      <div class="tally-meter-track" style="height: 8px; border-radius: 4px; background: var(--border-default); overflow: hidden;">
+        <div class="tally-meter-fill" style="width: ${scorePct}%; height: 100%; background: linear-gradient(90deg, #4285F4, #34A853); transition: width 0.4s ease;"></div>
       </div>
     `;
-    container.appendChild(meter);
+    container.appendChild(card);
   });
 }
 
@@ -1313,29 +1381,31 @@ async function claimBlindToken() {
 async function castAnonymousBallot(e) {
   e.preventDefault();
   const selected = document.querySelector('input[name="ballot-choice-opt"]:checked');
-  if (!selected) return showToast('Please select an option', true);
+  if (!selected) return showToast('Please select a team member to evaluate', true);
 
   const sessionId = state.currentVotingSessionId || 1;
-  const optionId = parseInt(selected.value, 10);
+  const candidateId = parseInt(selected.value, 10);
+  const ratingInput = document.getElementById('selected-ballot-rating');
+  const rating = ratingInput ? parseInt(ratingInput.value, 10) : 5;
   const token = state.unlinkedBallotToken;
 
   try {
     const res = await fetch('/api/voting/cast', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ session_id: sessionId, option_id: optionId, token })
+      body: JSON.stringify({ session_id: sessionId, candidate_id: candidateId, rating, token })
     });
 
     const data = await res.json();
 
     if (!res.ok) {
-      showToast(data.error || 'Failed to submit ballot', true);
+      showToast(data.error || 'Failed to submit evaluation', true);
       return;
     }
 
     state.unlinkedBallotToken = null;
     sessionStorage.removeItem('ballot_token_' + sessionId);
-    showToast('Anonymous review ballot successfully recorded!');
+    showToast(`Anonymous evaluation of ${rating}/5 stars successfully recorded!`);
     await loadVotingSession();
     await loadPersonalDashboard();
   } catch (err) {
@@ -1724,8 +1794,8 @@ function renderTeamRoster() {
           <span class="meta-val" style="text-transform: capitalize;">${m.team_track}</span>
         </div>
         <div class="meta-row">
-          <span class="meta-label">GitHub Handle</span>
-          <span class="meta-val">@${m.handle}</span>
+          <span class="meta-label">Team Handle</span>
+          <span class="meta-val">${m.email || `@${m.handle}`}</span>
         </div>
         <div class="meta-row">
           <span class="meta-label">Allocated Tasks</span>
@@ -1735,13 +1805,13 @@ function renderTeamRoster() {
 
       <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
         ${isPeersView && !isMe ? `
+          <button class="btn btn-outlined btn-sm btn-peer-feedback" data-id="${m.id}" style="flex: 1;">
+            + Feedback
+          </button>
           <button class="btn btn-filled btn-sm btn-peer-tasklet" data-id="${m.id}" style="flex: 1;">
-            + Send Tasklet
+            + Tasklet
           </button>
         ` : ''}
-        <button class="btn btn-outlined btn-sm btn-roster-switch" data-handle="${m.handle}" style="${isPeersView && !isMe ? '' : 'flex: 1;'}">
-          ${isMe ? 'Current User' : 'Switch Persona'}
-        </button>
         ${!isPeersView && isHost && !m.is_host ? `
           <button class="btn btn-danger btn-sm btn-remove-member" data-id="${m.id}" title="Remove member from allowlist">
             Remove
@@ -1750,12 +1820,12 @@ function renderTeamRoster() {
       </div>
     `;
 
-    card.querySelector('.btn-roster-switch')?.addEventListener('click', async () => {
-      if (!isMe) await loginAs(m.handle);
-    });
-
     card.querySelector('.btn-peer-tasklet')?.addEventListener('click', () => {
       openSendTaskletModal(m.id);
+    });
+
+    card.querySelector('.btn-peer-feedback')?.addEventListener('click', () => {
+      openSendFeedbackModal(m.id);
     });
 
     card.querySelector('.btn-remove-member')?.addEventListener('click', async () => {
@@ -1995,39 +2065,41 @@ function setupModals() {
 
   document.getElementById('form-onboard-member')?.addEventListener('submit', async (e) => {
     e.preventDefault();
-    const github_username = document.getElementById('onboard-github-user').value.trim();
+    const name = document.getElementById('onboard-name').value.trim();
+    const email = document.getElementById('onboard-email').value.trim();
     const role = document.getElementById('onboard-role').value.trim();
     const team_track = document.getElementById('onboard-track').value;
     const submitBtn = document.getElementById('btn-submit-onboard');
 
-    if (!github_username || !role) {
-      showToast('Please enter both username and role.', true);
+    if (!name || !email || !role) {
+      showToast('Please enter name, email, and role.', true);
       return;
     }
 
+    const handle = email.split('@')[0];
     const originalText = submitBtn.textContent;
-    submitBtn.textContent = 'Verifying with GitHub...';
+    submitBtn.textContent = 'Enrolling Member...';
     submitBtn.disabled = true;
 
     try {
       const res = await fetch('/api/members', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ github_username, role, team_track })
+        body: JSON.stringify({ name, email, handle, role, team_track })
       });
       const data = await res.json();
       if (!res.ok) {
-        showToast(data.error || 'Failed to onboard member', true);
+        showToast(data.error || 'Failed to enroll member', true);
         return;
       }
-      showToast(data.message || 'Member successfully onboarded!');
+      showToast(`Member ${name} successfully enrolled!`);
       onboardModal.close();
       document.getElementById('form-onboard-member').reset();
       await loadMembers();
       renderTeamRoster();
       populateTaskAssigneeDropdown();
     } catch (err) {
-      showToast('Network error onboarding member', true);
+      showToast('Network error enrolling member', true);
     } finally {
       submitBtn.textContent = originalText;
       submitBtn.disabled = false;
@@ -2205,11 +2277,54 @@ function setupModals() {
   });
 
   // Send Tasklet Modal
+  // Multipurpose Peers: Micro-Tasks & Feedback Modal Bindings
   const taskletModal = document.getElementById('modal-send-tasklet');
+  const feedbackModal = document.getElementById('modal-send-feedback');
+
   document.getElementById('btn-open-send-tasklet')?.addEventListener('click', () => openSendTaskletModal());
   document.getElementById('btn-close-send-tasklet-modal')?.addEventListener('click', () => taskletModal?.close());
   document.getElementById('btn-cancel-send-tasklet')?.addEventListener('click', () => taskletModal?.close());
 
+  document.getElementById('btn-open-send-feedback')?.addEventListener('click', () => openSendFeedbackModal());
+  document.getElementById('btn-close-send-feedback-modal')?.addEventListener('click', () => feedbackModal?.close());
+  document.getElementById('btn-cancel-send-feedback')?.addEventListener('click', () => feedbackModal?.close());
+
+  // Main Mode Toggle (Micro-Tasks vs Peer Feedback)
+  document.querySelectorAll('#peers-main-mode-toggle button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#peers-main-mode-toggle button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      const mode = btn.dataset.mode;
+      state.peersMainMode = mode;
+
+      const secTasklets = document.getElementById('section-peers-tasklets');
+      const secFeedback = document.getElementById('section-peers-feedback');
+      const hintEl = document.getElementById('peers-panel-hint');
+
+      if (mode === 'tasklets') {
+        secTasklets?.classList.remove('hidden');
+        secFeedback?.classList.add('hidden');
+        if (hintEl) hintEl.textContent = 'Informal peer-to-peer micro-tasks and review requests';
+      } else {
+        secTasklets?.classList.add('hidden');
+        secFeedback?.classList.remove('hidden');
+        if (hintEl) hintEl.textContent = 'Constructive peer praise, code review notes, and kudos';
+      }
+      renderTasklets();
+    });
+  });
+
+  // Peer Feedback Subtabs ("Received" vs "Shared")
+  document.querySelectorAll('#feedback-tab-group button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#feedback-tab-group button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.feedbackTab = btn.dataset.feedbackTab;
+      renderTasklets();
+    });
+  });
+
+  // Send Micro-Task Form Submit
   document.getElementById('form-send-tasklet')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const receiver_id = parseInt(document.getElementById('tasklet-receiver').value, 10);
@@ -2225,27 +2340,70 @@ function setupModals() {
       const res = await fetch('/api/tasklets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ receiver_id, title, description })
+        body: JSON.stringify({ receiver_id, title, description, type: 'TASKLET' })
       });
 
       const data = await res.json();
       if (!res.ok) {
-        showToast(data.error || 'Failed to send tasklet', true);
+        showToast(data.error || 'Failed to send micro-task', true);
         return;
       }
 
-      showToast('Tasklet sent to teammate!');
+      showToast('Micro-task sent to teammate!');
       taskletModal?.close();
       document.getElementById('form-send-tasklet').reset();
       await loadTasklets();
     } catch (err) {
-      showToast('Error sending tasklet', true);
+      showToast('Error sending micro-task', true);
+    }
+  });
+
+  // Share Peer Feedback Form Submit
+  document.getElementById('form-send-feedback')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const receiver_id = parseInt(document.getElementById('feedback-receiver').value, 10);
+    const category = document.getElementById('feedback-category').value;
+    const title = document.getElementById('feedback-title').value.trim();
+    const description = document.getElementById('feedback-desc').value.trim();
+    const is_anonymous = document.getElementById('feedback-is-anonymous')?.checked || false;
+
+    if (!receiver_id || !title || !description) {
+      showToast('Please select a teammate, category, and feedback notes', true);
+      return;
+    }
+
+    try {
+      const res = await fetch('/api/tasklets', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          receiver_id,
+          title,
+          description,
+          type: 'FEEDBACK',
+          category,
+          is_anonymous
+        })
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        showToast(data.error || 'Failed to share feedback', true);
+        return;
+      }
+
+      showToast(is_anonymous ? 'Feedback sent anonymously to teammate!' : 'Feedback shared with teammate!');
+      feedbackModal?.close();
+      document.getElementById('form-send-feedback').reset();
+      await loadTasklets();
+    } catch (err) {
+      showToast('Error sharing feedback', true);
     }
   });
 }
 
 // -------------------------------------------------------------
-// MODULE 4: PEERS & TASKLETS (PEER-TO-PEER MICRO-TASKS)
+// MODULE 4: MULTIPURPOSE PEERS: MICRO-TASKS & PEER FEEDBACK
 // -------------------------------------------------------------
 async function loadTasklets() {
   try {
@@ -2255,93 +2413,171 @@ async function loadTasklets() {
     renderTasklets();
     updateTaskletBadges();
   } catch (err) {
-    console.error('Failed to load tasklets:', err);
+    console.error('Failed to load tasklets and feedback:', err);
   }
 }
 
 function updateTaskletBadges() {
   if (!state.currentUser) return;
-  const received = (state.tasklets || []).filter(t => t.receiver_id === state.currentUser.id);
-  const sent = (state.tasklets || []).filter(t => t.sender_id === state.currentUser.id);
-  const pendingReceived = received.filter(t => t.status === 'PENDING').length;
+  const currentUserId = state.currentUser.id;
 
-  const countRecEl = document.getElementById('count-tasklets-received');
-  if (countRecEl) countRecEl.textContent = received.length;
+  // Filter Micro-Tasks
+  const allTasks = (state.tasklets || []).filter(t => !t.type || t.type === 'TASKLET');
+  const tasksReceived = allTasks.filter(t => t.receiver_id === currentUserId);
+  const tasksSent = allTasks.filter(t => t.sender_id === currentUserId);
+  const pendingTasks = tasksReceived.filter(t => t.status === 'PENDING').length;
 
-  const countSentEl = document.getElementById('count-tasklets-sent');
-  if (countSentEl) countSentEl.textContent = sent.length;
+  // Filter Peer Feedback
+  const allFeedback = (state.tasklets || []).filter(t => t.type === 'FEEDBACK');
+  const feedbackReceived = allFeedback.filter(t => t.receiver_id === currentUserId);
+  const feedbackSent = allFeedback.filter(t => t.sender_id === currentUserId);
+
+  const countTasksRecEl = document.getElementById('count-tasklets-received');
+  if (countTasksRecEl) countTasksRecEl.textContent = tasksReceived.length;
+
+  const countTasksSentEl = document.getElementById('count-tasklets-sent');
+  if (countTasksSentEl) countTasksSentEl.textContent = tasksSent.length;
+
+  const countFbRecEl = document.getElementById('count-feedback-received');
+  if (countFbRecEl) countFbRecEl.textContent = feedbackReceived.length;
+
+  const countFbSentEl = document.getElementById('count-feedback-sent');
+  if (countFbSentEl) countFbSentEl.textContent = feedbackSent.length;
 
   const badgeEl = document.getElementById('badge-tasklets-count');
   if (badgeEl) {
-    badgeEl.textContent = pendingReceived;
-    badgeEl.style.display = (!state.currentUser.is_host && pendingReceived > 0) ? 'inline-block' : 'none';
+    badgeEl.textContent = pendingTasks;
+    badgeEl.style.display = (!state.currentUser.is_host && pendingTasks > 0) ? 'inline-block' : 'none';
   }
 }
 
 function renderTasklets() {
   if (!state.currentUser) return;
+  const currentUserId = state.currentUser.id;
+
+  // 1. Render Micro-Tasks (Tasklets)
   const containerRec = document.getElementById('container-tasklets-received');
   const containerSent = document.getElementById('container-tasklets-sent');
-  if (!containerRec || !containerSent) return;
 
-  const isReceived = state.taskletTab === 'received';
-  containerRec.classList.toggle('hidden', !isReceived);
-  containerSent.classList.toggle('hidden', isReceived);
+  if (containerRec && containerSent) {
+    const isReceived = state.taskletTab === 'received';
+    containerRec.classList.toggle('hidden', !isReceived);
+    containerSent.classList.toggle('hidden', isReceived);
 
-  const list = isReceived
-    ? (state.tasklets || []).filter(t => t.receiver_id === state.currentUser.id)
-    : (state.tasklets || []).filter(t => t.sender_id === state.currentUser.id);
+    const microTasks = (state.tasklets || []).filter(t => !t.type || t.type === 'TASKLET');
+    const taskList = isReceived
+      ? microTasks.filter(t => t.receiver_id === currentUserId)
+      : microTasks.filter(t => t.sender_id === currentUserId);
 
-  const targetContainer = isReceived ? containerRec : containerSent;
-  targetContainer.innerHTML = '';
+    const targetContainer = isReceived ? containerRec : containerSent;
+    targetContainer.innerHTML = '';
 
-  if (list.length === 0) {
-    targetContainer.innerHTML = `
-      <div class="empty-state" style="padding: 24px 12px; text-align: center;">
-        <p style="color: var(--text-muted); font-size: 13px;">No ${isReceived ? 'received' : 'sent'} tasklets yet. Click "+ Send Tasklet" to ask a teammate for a review or quick sync.</p>
-      </div>
-    `;
-    return;
+    if (taskList.length === 0) {
+      targetContainer.innerHTML = `
+        <div class="empty-state" style="padding: 24px 12px; text-align: center;">
+          <p style="color: var(--text-muted); font-size: 13px;">No ${isReceived ? 'received' : 'sent'} micro-tasks yet. Click "+ Send Micro-Task" to request a quick peer review or check.</p>
+        </div>
+      `;
+    } else {
+      taskList.forEach(t => {
+        const card = document.createElement('div');
+        card.className = 'tasklet-card';
+        const statusClass = t.status === 'DONE' ? 'tasklet-done' : (t.status === 'ACCEPTED' ? 'tasklet-accepted' : 'tasklet-pending');
+        const counterpartLabel = isReceived ? `From: ${t.sender_name || 'Teammate'}` : `To: ${t.receiver_name || 'Teammate'}`;
+        const dateStr = new Date(t.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+        let actionsHtml = '';
+        if (isReceived) {
+          if (t.status === 'PENDING') {
+            actionsHtml = `
+              <div style="display: flex; gap: 8px; margin-top: 10px;">
+                <button class="btn btn-outlined btn-sm" onclick="handleTaskletStatus(${t.id}, 'ACCEPTED')">Accept</button>
+                <button class="btn btn-filled btn-sm" onclick="handleTaskletStatus(${t.id}, 'DONE')">Mark Done</button>
+              </div>
+            `;
+          } else if (t.status === 'ACCEPTED') {
+            actionsHtml = `
+              <div style="display: flex; gap: 8px; margin-top: 10px;">
+                <button class="btn btn-filled btn-sm" onclick="handleTaskletStatus(${t.id}, 'DONE')">Mark Done</button>
+              </div>
+            `;
+          }
+        }
+
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <div style="font-weight: 600; font-size: 14px; color: var(--text-primary); margin-bottom: 2px;">${t.title}</div>
+              <div style="font-size: 12px; color: var(--text-secondary);">${counterpartLabel} • ${dateStr}</div>
+            </div>
+            <span class="tasklet-badge ${statusClass}">${t.status}</span>
+          </div>
+          ${t.description ? `<p style="font-size: 13px; color: var(--text-secondary); margin: 8px 0 0 0; line-height: 1.4;">${t.description}</p>` : ''}
+          ${actionsHtml}
+        `;
+        targetContainer.appendChild(card);
+      });
+    }
   }
 
-  list.forEach(t => {
-    const card = document.createElement('div');
-    card.className = 'tasklet-card';
-    const statusClass = t.status === 'DONE' ? 'tasklet-done' : (t.status === 'ACCEPTED' ? 'tasklet-accepted' : 'tasklet-pending');
-    const counterpartLabel = isReceived ? `From: ${t.sender_name || 'Teammate'}` : `To: ${t.receiver_name || 'Teammate'}`;
-    const dateStr = new Date(t.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  // 2. Render Peer Feedback
+  const containerFbRec = document.getElementById('container-feedback-received');
+  const containerFbSent = document.getElementById('container-feedback-sent');
 
-    let actionsHtml = '';
-    if (isReceived) {
-      if (t.status === 'PENDING') {
-        actionsHtml = `
-          <div style="display: flex; gap: 8px; margin-top: 10px;">
-            <button class="btn btn-outlined btn-sm" onclick="handleTaskletStatus(${t.id}, 'ACCEPTED')">Accept</button>
-            <button class="btn btn-filled btn-sm" onclick="handleTaskletStatus(${t.id}, 'DONE')">Mark Done</button>
-          </div>
-        `;
-      } else if (t.status === 'ACCEPTED') {
-        actionsHtml = `
-          <div style="display: flex; gap: 8px; margin-top: 10px;">
-            <button class="btn btn-filled btn-sm" onclick="handleTaskletStatus(${t.id}, 'DONE')">Mark Done</button>
-          </div>
-        `;
-      }
-    }
+  if (containerFbRec && containerFbSent) {
+    const isFbReceived = (state.feedbackTab || 'received') === 'received';
+    containerFbRec.classList.toggle('hidden', !isFbReceived);
+    containerFbSent.classList.toggle('hidden', isFbReceived);
 
-    card.innerHTML = `
-      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
-        <div>
-          <div style="font-weight: 600; font-size: 14px; color: var(--text-primary); margin-bottom: 2px;">${t.title}</div>
-          <div style="font-size: 12px; color: var(--text-secondary);">${counterpartLabel} • ${dateStr}</div>
+    const allFeedback = (state.tasklets || []).filter(t => t.type === 'FEEDBACK');
+    const fbList = isFbReceived
+      ? allFeedback.filter(t => t.receiver_id === currentUserId)
+      : allFeedback.filter(t => t.sender_id === currentUserId);
+
+    const targetFbContainer = isFbReceived ? containerFbRec : containerFbSent;
+    targetFbContainer.innerHTML = '';
+
+    const categoryIcons = {
+      KUDOS: '🌟 Kudos',
+      COLLABORATION: '🤝 Team Collaboration',
+      CODE_QUALITY: '💻 Code Quality',
+      SUGGESTION: '💡 Suggestion',
+      GENERAL: '💬 Peer Note'
+    };
+
+    if (fbList.length === 0) {
+      targetFbContainer.innerHTML = `
+        <div class="empty-state" style="padding: 24px 12px; text-align: center;">
+          <p style="color: var(--text-muted); font-size: 13px;">No ${isFbReceived ? 'received' : 'shared'} feedback yet. Click "+ Share Feedback" to praise or support a teammate.</p>
         </div>
-        <span class="tasklet-badge ${statusClass}">${t.status}</span>
-      </div>
-      ${t.description ? `<p style="font-size: 13px; color: var(--text-secondary); margin: 8px 0 0 0; line-height: 1.4;">${t.description}</p>` : ''}
-      ${actionsHtml}
-    `;
-    targetContainer.appendChild(card);
-  });
+      `;
+    } else {
+      fbList.forEach(fb => {
+        const card = document.createElement('div');
+        card.className = 'tasklet-card';
+        card.style.borderLeft = '3px solid var(--google-blue)';
+        const catLabel = categoryIcons[fb.category] || '💬 Feedback';
+        const senderLabel = isFbReceived
+          ? (fb.is_anonymous ? 'Anonymous Teammate' : (fb.sender_name || 'Teammate'))
+          : `To: ${fb.receiver_name || 'Teammate'}${fb.is_anonymous ? ' (Sent Anonymously)' : ''}`;
+        const dateStr = new Date(fb.created_at).toLocaleDateString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+        card.innerHTML = `
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                <span class="status-pill pill-purple" style="font-size: 11px; padding: 2px 8px;">${catLabel}</span>
+                <span style="font-weight: 600; font-size: 14px; color: var(--text-primary);">${fb.title}</span>
+              </div>
+              <div style="font-size: 12px; color: var(--text-secondary);">${senderLabel} • ${dateStr}</div>
+            </div>
+          </div>
+          ${fb.description ? `<p style="font-size: 13px; color: var(--text-primary); margin: 8px 0 0 0; line-height: 1.5; background: var(--bg-surface-elevated); padding: 10px 12px; border-radius: 6px;">${fb.description}</p>` : ''}
+        `;
+        targetFbContainer.appendChild(card);
+      });
+    }
+  }
 }
 
 window.handleTaskletStatus = async function(id, status) {
@@ -2353,13 +2589,13 @@ window.handleTaskletStatus = async function(id, status) {
     });
     const data = await res.json();
     if (!res.ok) {
-      showToast(data.error || 'Failed to update tasklet', true);
+      showToast(data.error || 'Failed to update micro-task', true);
       return;
     }
-    showToast(`Tasklet marked ${status.toLowerCase()}`);
+    showToast(`Micro-task marked ${status.toLowerCase()}`);
     await loadTasklets();
   } catch (err) {
-    showToast('Network error updating tasklet', true);
+    showToast('Network error updating micro-task', true);
   }
 };
 
@@ -2381,6 +2617,31 @@ function openSendTaskletModal(preselectedReceiverId = null) {
   }
   document.getElementById('tasklet-title').value = '';
   document.getElementById('tasklet-desc').value = '';
+  modal.showModal();
+}
+
+function openSendFeedbackModal(preselectedReceiverId = null) {
+  const modal = document.getElementById('modal-send-feedback');
+  if (!modal) return;
+  const select = document.getElementById('feedback-receiver');
+  if (select) {
+    select.innerHTML = '';
+    (state.members || []).filter(m => m.id !== state.currentUser?.id).forEach(m => {
+      const opt = document.createElement('option');
+      opt.value = m.id;
+      opt.textContent = `${m.name} (@${m.handle} · ${m.role})`;
+      if (preselectedReceiverId && m.id === preselectedReceiverId) {
+        opt.selected = true;
+      }
+      select.appendChild(opt);
+    });
+  }
+  const titleEl = document.getElementById('feedback-title');
+  const descEl = document.getElementById('feedback-desc');
+  const anonEl = document.getElementById('feedback-is-anonymous');
+  if (titleEl) titleEl.value = '';
+  if (descEl) descEl.value = '';
+  if (anonEl) anonEl.checked = false;
   modal.showModal();
 }
 

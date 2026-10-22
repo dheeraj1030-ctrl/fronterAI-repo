@@ -39,7 +39,7 @@
       </div>
 
       <!-- Google OAuth 2.0 Sign-In Button -->
-      <a href="/api/auth/google" class="btn btn-github btn-block" id="btn-google-oauth" style="background: #4285F4; border-color: #4285F4; gap: 12px;">
+      <a href="/api/auth/google" class="btn btn-google-auth btn-block" id="btn-google-oauth" style="background: #4285F4; border-color: #4285F4; gap: 12px;">
         <svg width="20" height="20" viewBox="0 0 48 48" fill="none">
           <path fill="#FFC107" d="M43.611 20.083H42V20H24v8h11.303c-1.649 4.657-6.08 8-11.303 8-6.627 0-12-5.373-12-12s5.373-12 12-12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 12.955 4 4 12.955 4 24s8.955 20 20 20 20-8.955 20-20c0-1.341-.138-2.65-.389-3.917z"/>
           <path fill="#FF3D00" d="M6.306 14.691l6.571 4.819C14.655 15.108 18.961 12 24 12c3.059 0 5.842 1.154 7.961 3.039l5.657-5.657C34.046 6.053 29.268 4 24 4 16.318 4 9.656 8.337 6.306 14.691z"/>
@@ -407,21 +407,40 @@
                 </div>
               </div>
 
-              <!-- State 2: Cast Ballot for a Team Member -->
+              <!-- State 2: Cast Ballot for a Team Member (1-5 Rating) -->
               <div id="voting-cast-box" class="voting-subsurface hidden">
                 <div class="subsurface-header">
                   <div class="icon-circle icon-green">
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 12 2 2 4-4"></path><path d="M5 7c0-1.1.9-2 2-2h10a2 2 0 0 1 2 2v12H5V7Z"></path><path d="M22 19H2"></path></svg>
                   </div>
                   <div>
-                    <h4>Step 2: Cast Your Anonymous Vote for a Peer</h4>
-                    <p>Select the team member you wish to recognize for Sprint 1. The ballot carries NO member identity.</p>
+                    <h4>Step 2: Anonymous Peer Evaluation (1 to 5 Stars)</h4>
+                    <p>Select a teammate and rate their <strong>Sprint Contribution &amp; Collaboration</strong>. Your ballot carries NO member identity.</p>
                   </div>
                 </div>
 
                 <form id="form-submit-ballot" class="ballot-choices-form">
-                  <div class="choices-stack" id="ballot-options-container">
-                    <!-- Populated dynamically with Team Members -->
+                  <div class="form-field" style="margin-bottom: 16px;">
+                    <label style="font-weight: 600; font-size: 13px; margin-bottom: 8px; display: block;">Select Team Member to Evaluate:</label>
+                    <div class="choices-stack" id="ballot-options-container">
+                      <!-- Populated dynamically with Team Members -->
+                    </div>
+                  </div>
+
+                  <!-- 1 to 5 Star Rating Metric -->
+                  <div class="form-field" style="margin-bottom: 18px; background: var(--bg-surface-elevated); padding: 14px; border-radius: 8px; border: 1px solid var(--border-subtle);">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                      <label style="font-weight: 600; font-size: 13px; margin: 0;">Sprint Contribution &amp; Collaboration Metric:</label>
+                      <span id="rating-score-label" style="font-weight: 700; color: #fbbc04; font-size: 14px;">5 / 5 ★ (Outstanding)</span>
+                    </div>
+                    <div class="star-rating-bar" id="star-rating-selector" style="display: flex; gap: 8px;">
+                      <button type="button" class="rating-star-btn" data-rating="1" title="1 - Needs Improvement" style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-surface); cursor: pointer; font-size: 16px;">★ 1</button>
+                      <button type="button" class="rating-star-btn" data-rating="2" title="2 - Fair" style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-surface); cursor: pointer; font-size: 16px;">★ 2</button>
+                      <button type="button" class="rating-star-btn" data-rating="3" title="3 - Good" style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-surface); cursor: pointer; font-size: 16px;">★ 3</button>
+                      <button type="button" class="rating-star-btn" data-rating="4" title="4 - Very Good" style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--border-default); background: var(--bg-surface); cursor: pointer; font-size: 16px;">★ 4</button>
+                      <button type="button" class="rating-star-btn active" data-rating="5" title="5 - Outstanding" style="flex: 1; padding: 10px; border-radius: 6px; border: 1px solid var(--google-blue); background: rgba(66,133,244,0.15); color: #fbbc04; cursor: pointer; font-size: 16px;">★ 5</button>
+                    </div>
+                    <input type="hidden" id="selected-ballot-rating" value="5">
                   </div>
 
                   <div class="token-proof-box">
@@ -430,7 +449,7 @@
                   </div>
 
                   <div class="subsurface-actions">
-                    <button type="submit" class="btn btn-filled">Submit Anonymous Vote</button>
+                    <button type="submit" class="btn btn-filled">Submit Anonymous Evaluation</button>
                   </div>
                 </form>
               </div>
@@ -442,8 +461,8 @@
                     <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>
                   </div>
                   <div>
-                    <h4>Vote Recorded in Anonymous Ballot Box</h4>
-                    <p id="voting-status-msg">Your vote has been committed with an unlinked cryptographic token. The results will be tallied in aggregate.</p>
+                    <h4>Evaluation Recorded in Anonymous Ballot Box</h4>
+                    <p id="voting-status-msg">Your 1–5 performance rating has been committed anonymously. Results will be calculated in aggregate.</p>
                   </div>
                 </div>
               </div>
@@ -451,21 +470,21 @@
 
             <!-- Participation & Tally -->
             <div class="voting-stats-card card">
-              <h4 class="stats-card-title">Team Participation (8 Eligible)</h4>
+              <h4 class="stats-card-title">Team Participation</h4>
               <div class="radial-participation-box">
                 <div class="participation-ring-stat">
-                  <span class="participation-number" id="stats-ballots-count">2</span>
-                  <span class="participation-total">/ 8 Voted</span>
+                  <span class="participation-number" id="stats-ballots-count">0</span>
+                  <span class="participation-total" id="stats-ballots-total">/ 0 Evaluated</span>
                 </div>
                 <div class="participation-bar-outer">
-                  <div class="participation-bar-inner" id="stats-ballots-bar" style="width: 25%;"></div>
+                  <div class="participation-bar-inner" id="stats-ballots-bar" style="width: 0%;"></div>
                 </div>
-                <p class="participation-explainer" id="stats-participation-explainer">Waiting for remaining members before aggregate reveal.</p>
+                <p class="participation-explainer" id="stats-participation-explainer">Waiting for team evaluations before aggregate reveal.</p>
               </div>
 
               <!-- Tally Display -->
               <div id="tally-results-container" class="tally-results-box hidden">
-                <h5>Peer Review Tally (Revealed)</h5>
+                <h5>Peer Review Standings (Revealed)</h5>
                 <div class="tally-bars-stack" id="tally-bars-display"></div>
               </div>
             </div>
@@ -473,34 +492,52 @@
         </section>
 
         <!-- ======================================================== -->
-        <!-- MODULE 4: PEERS & TASKLETS (FOR MEMBERS & COLLABORATION) -->
+        <!-- MODULE 4: MULTIPURPOSE PEERS: MICRO-TASKS & PEER FEEDBACK -->
         <!-- ======================================================== -->
         <section id="view-peers" class="workspace-view">
           <div class="view-header">
             <div>
-              <h2 class="view-title">Peers &amp; Tasklets</h2>
-              <p class="view-subtitle">Send and track informal micro-tasks between teammates, and view the team directory</p>
+              <h2 class="view-title">Peers, Tasks &amp; Feedback</h2>
+              <p class="view-subtitle">Coordinate micro-tasks, exchange constructive peer feedback, and browse the team directory</p>
             </div>
             <div class="header-action-group">
-              <button class="btn btn-filled" id="btn-open-send-tasklet">+ Send Tasklet</button>
+              <button class="btn btn-outlined" id="btn-open-send-feedback">+ Share Feedback</button>
+              <button class="btn btn-filled" id="btn-open-send-tasklet">+ Send Micro-Task</button>
             </div>
           </div>
 
-          <!-- Peer Tasklets Section -->
+          <!-- Multipurpose Panel Navigation (Micro-Tasks vs Peer Feedback) -->
           <div class="card" style="margin-bottom: 20px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
-              <div class="segmented-control" id="tasklets-tab-group">
-                <button class="segmented-tab active" id="tab-tasklets-received" data-tasklet-tab="received">Received (<span id="count-tasklets-received">0</span>)</button>
-                <button class="segmented-tab" id="tab-tasklets-sent" data-tasklet-tab="sent">Sent (<span id="count-tasklets-sent">0</span>)</button>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 10px;">
+              <div class="segmented-control" id="peers-main-mode-toggle">
+                <button class="segmented-tab active" id="tab-mode-tasklets" data-mode="tasklets">Micro-Tasks (Tasklets)</button>
+                <button class="segmented-tab" id="tab-mode-feedback" data-mode="feedback">Peer Feedback</button>
               </div>
-              <div style="font-size: 12px; color: var(--text-muted);">Informal peer-to-peer micro-tasks</div>
+              <div style="font-size: 12px; color: var(--text-muted);" id="peers-panel-hint">Collaborative peer-to-peer exchange</div>
             </div>
 
-            <div id="container-tasklets-received" class="tasklets-list">
-              <!-- Populated dynamically -->
+            <!-- SECTION A: MICRO-TASKS (TASKLETS) -->
+            <div id="section-peers-tasklets">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                <div class="segmented-control" id="tasklets-tab-group">
+                  <button class="segmented-tab active" id="tab-tasklets-received" data-tasklet-tab="received">Received (<span id="count-tasklets-received">0</span>)</button>
+                  <button class="segmented-tab" id="tab-tasklets-sent" data-tasklet-tab="sent">Sent (<span id="count-tasklets-sent">0</span>)</button>
+                </div>
+              </div>
+              <div id="container-tasklets-received" class="tasklets-list"></div>
+              <div id="container-tasklets-sent" class="tasklets-list hidden"></div>
             </div>
-            <div id="container-tasklets-sent" class="tasklets-list hidden">
-              <!-- Populated dynamically -->
+
+            <!-- SECTION B: PEER FEEDBACK (REVIEWS & KUDOS) -->
+            <div id="section-peers-feedback" class="hidden">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+                <div class="segmented-control" id="feedback-tab-group">
+                  <button class="segmented-tab active" id="tab-feedback-received" data-feedback-tab="received">Feedback Received (<span id="count-feedback-received">0</span>)</button>
+                  <button class="segmented-tab" id="tab-feedback-sent" data-feedback-tab="sent">Feedback Shared (<span id="count-feedback-sent">0</span>)</button>
+                </div>
+              </div>
+              <div id="container-feedback-received" class="tasklets-list"></div>
+              <div id="container-feedback-sent" class="tasklets-list hidden"></div>
             </div>
           </div>
 
@@ -720,7 +757,7 @@
       <div class="dialog-header">
         <div>
           <h3>Submit Completed Deliverable</h3>
-          <p>Attach your GitHub Pull Request link and implementation notes.</p>
+          <p>Attach your documentation, demo, or project link and implementation notes.</p>
         </div>
         <button class="btn-icon btn-close-modal" id="btn-close-submit-modal">&times;</button>
       </div>
@@ -730,8 +767,8 @@
           <select id="submit-task-select" class="input-select" required></select>
         </div>
         <div class="form-field">
-          <label for="submit-pr-url">Deliverable URL (GitHub PR / Commit / Doc)</label>
-          <input type="url" id="submit-pr-url" required placeholder="https://github.com/frontier-ai/.../pull/18" class="input-text">
+          <label for="submit-pr-url">Deliverable URL (Docs, Drive, Demo, or Repo Link)</label>
+          <input type="url" id="submit-pr-url" required placeholder="https://docs.google.com/... or project link" class="input-text">
         </div>
         <div class="form-field">
           <label for="submit-notes">Implementation Notes</label>
@@ -921,15 +958,19 @@
       <div class="dialog-header">
         <div>
           <h3>Onboard Team Member</h3>
-          <p>Add a developer to the Frontier AI allowlist using their GitHub handle.</p>
+          <p>Add a developer to the Frontier AI allowlist using their Google Account email.</p>
         </div>
         <button class="btn-icon btn-close-modal" id="btn-close-onboard-modal">&times;</button>
       </div>
       <form id="form-onboard-member" class="dialog-form">
         <div class="form-field">
-          <label for="onboard-github-user">GitHub Username</label>
-          <input type="text" id="onboard-github-user" required placeholder="e.g. torvalds (without @)" class="input-text" autocomplete="off">
-          <small style="color: var(--text-muted); font-size: 11.5px; margin-top: 4px; display: block;">The system queries GitHub to verify their profile and retrieve their immutable numeric ID.</small>
+          <label for="onboard-name">Full Name</label>
+          <input type="text" id="onboard-name" required placeholder="e.g. Alex Rivera" class="input-text">
+        </div>
+        <div class="form-field">
+          <label for="onboard-email">Google Email Address</label>
+          <input type="email" id="onboard-email" required placeholder="e.g. alex.dev@gmail.com" class="input-text" autocomplete="off">
+          <small style="color: var(--text-muted); font-size: 11.5px; margin-top: 4px; display: block;">Allowlisted members can immediately sign in via Google OAuth 2.0.</small>
         </div>
         <div class="form-field">
           <label for="onboard-role">Team Role</label>
@@ -945,7 +986,7 @@
         </div>
         <div class="dialog-actions">
           <button type="button" class="btn btn-secondary" id="btn-cancel-onboard">Cancel</button>
-          <button type="submit" class="btn btn-filled" id="btn-submit-onboard">Verify & Enroll Member</button>
+          <button type="submit" class="btn btn-filled" id="btn-submit-onboard">Enroll Member</button>
         </div>
       </form>
     </div>
@@ -979,6 +1020,52 @@
         <div class="dialog-actions">
           <button type="button" class="btn btn-outlined" id="btn-cancel-send-tasklet">Cancel</button>
           <button type="submit" class="btn btn-filled">Send Tasklet</button>
+        </div>
+      </form>
+    </div>
+  </dialog>
+
+  <!-- MODAL: SEND PEER FEEDBACK (COMMENDATION / SUGGESTION) -->
+  <dialog id="modal-send-feedback" class="workspace-dialog">
+    <div class="dialog-content">
+      <div class="dialog-header">
+        <div>
+          <h3>Share Peer Feedback</h3>
+          <p>Send constructive peer recognition, code review feedback, or collaboration notes.</p>
+        </div>
+        <button class="btn-icon btn-close-modal" id="btn-close-send-feedback-modal">&times;</button>
+      </div>
+      <form id="form-send-feedback" class="dialog-form">
+        <div class="form-group">
+          <label for="feedback-receiver">Recipient Peer</label>
+          <select id="feedback-receiver" required class="form-select"></select>
+        </div>
+        <div class="form-group">
+          <label for="feedback-category">Feedback Category</label>
+          <select id="feedback-category" class="form-select">
+            <option value="KUDOS">🌟 Kudos &amp; Commendation</option>
+            <option value="COLLABORATION">🤝 Team Collaboration &amp; Support</option>
+            <option value="CODE_QUALITY">💻 Code Quality &amp; Technical Impact</option>
+            <option value="SUGGESTION">💡 Constructive Suggestion</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="feedback-title">Feedback Subject</label>
+          <input type="text" id="feedback-title" required placeholder="e.g. Great architectural breakdown on the edge router" class="form-input">
+        </div>
+        <div class="form-group">
+          <label for="feedback-desc">Detailed Feedback Notes</label>
+          <textarea id="feedback-desc" rows="3" placeholder="Share specific examples and recognition..." class="form-textarea" required></textarea>
+        </div>
+        <div class="form-group" style="margin-top: 6px;">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 13px; color: var(--text-primary);">
+            <input type="checkbox" id="feedback-is-anonymous" style="width: 16px; height: 16px; accent-color: var(--google-blue);">
+            <span><strong>Send Anonymously</strong> (Your identity is masked as "Anonymous Teammate" for the receiver)</span>
+          </label>
+        </div>
+        <div class="dialog-actions">
+          <button type="button" class="btn btn-outlined" id="btn-cancel-send-feedback">Cancel</button>
+          <button type="submit" class="btn btn-filled">Share Feedback</button>
         </div>
       </form>
     </div>
