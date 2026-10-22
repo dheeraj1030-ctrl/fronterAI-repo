@@ -816,8 +816,14 @@ Be concise, authoritative, and grounded in the workspace data. Answer in plain t
       if (!groqKey) {
         groqDiagnostic = 'GROQ_API_KEY is not defined in Cloudflare Worker environment variables.';
       } else {
-        // Try llama-3.3-70b-versatile first, fallback to llama-3.1-8b-instant
-        const modelsToTry = ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'];
+        // Use active models available on user's Groq account
+        const modelsToTry = [
+          'openai/gpt-oss-120b',
+          'openai/gpt-oss-20b',
+          'qwen/qwen3.8-27b',
+          'llama-3.3-70b-versatile',
+          'llama-3.1-8b-instant'
+        ];
         for (const modelName of modelsToTry) {
           try {
             const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {

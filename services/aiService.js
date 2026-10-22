@@ -208,29 +208,46 @@ async function callGroqLlama(systemPrompt, history, userMessage) {
   }
 
   messages.push({ role: 'user', content: userMessage });
+  const modelsToTry = [
+    'openai/gpt-oss-120b',
+    'openai/gpt-oss-20b',
+    'qwen/qwen3.8-27b',
+    'llama-3.3-70b-versatile',
+    'llama-3.1-8b-instant'
+  ];
 
-  const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${GROQ_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      model: 'llama-3.3-70b-versatile',
-      messages,
-      temperature: 0.2,
-      max_tokens: 600
-    })
-  });
+  let lastError = null;
+  for (const model of modelsToTry) {
+    try {
+      const response = await fetch('https://api.groq.com/openai/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          model,
+          messages,
+          temperature: 0.2,
+          max_tokens: 600
+        })
+      });
 
-  if (!response.ok) {
-    const errorBody = await response.text();
-    console.error('Groq API Error:', errorBody);
-    throw new Error('Groq API communication failed');
+      if (response.ok) {
+        const data = await response.json();
+        return data.choices?.[0]?.message?.content || 'No response returned from Oracle.';
+      } else {
+        const errorBody = await response.text();
+        lastError = errorBody;
+        console.warn(`Groq model ${model} failed, trying next...:`, errorBody);
+      }
+    } catch (err) {
+      lastError = err.message;
+      console.warn(`Groq request for ${model} threw error:`, err);
+    }
   }
 
-  const data = await response.json();
-  return data.choices?.[0]?.message?.content || 'No response returned from Oracle.';
+  throw new Error(`All Groq models failed. Last error: ${lastError}`);
 }
 
 /**
