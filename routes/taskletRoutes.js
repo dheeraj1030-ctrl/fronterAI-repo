@@ -17,7 +17,18 @@ export async function handleTaskletRoutes(req, res, pathname, method) {
       ORDER BY t.id DESC
     `).all();
 
-    return sendJson(res, 200, { tasklets });
+    const sanitized = tasklets.map(t => {
+      if (t.is_anonymous && t.receiver_id === currentUser.id && t.sender_id !== currentUser.id) {
+        return {
+          ...t,
+          sender_name: 'Anonymous Teammate',
+          sender_handle: 'anonymous'
+        };
+      }
+      return t;
+    });
+
+    return sendJson(res, 200, { tasklets: sanitized });
   }
 
   if (pathname === '/api/tasklets' && method === 'POST') {
@@ -25,21 +36,25 @@ export async function handleTaskletRoutes(req, res, pathname, method) {
     if (!currentUser) return sendJson(res, 401, { error: 'Authentication required' });
 
     const body = await parseBody(req);
-    const { receiver_id, title, description } = body;
+    const { receiver_id, title, description, type, category, is_anonymous } = body;
 
     if (!receiver_id || !title) {
       return sendJson(res, 400, { error: 'Peer recipient and title are required.' });
     }
 
+    const itemType = type || 'TASKLET';
+    const itemCategory = category || (itemType === 'FEEDBACK' ? 'KUDOS' : 'GENERAL');
+    const isAnon = is_anonymous ? 1 : 0;
     const now = new Date().toISOString();
+
     const info = db.prepare(`
-      INSERT INTO tasklets (sender_id, receiver_id, title, description, status, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 'PENDING', ?, ?)
-    `).run(currentUser.id, parseInt(receiver_id, 10), title.trim(), (description || '').trim(), now, now);
+      INSERT INTO tasklets (sender_id, receiver_id, title, description, status, type, category, is_anonymous, created_at, updated_at)
+      VALUES (?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?)
+    `).run(currentUser.id, parseInt(receiver_id, 10), title.trim(), (description || '').trim(), itemType, itemCategory, isAnon, now, now);
 
-    logAudit(currentUser.handle, 'CREATE_TASKLET', `tasklet_${info.lastInsertRowid}`, `Sent tasklet "${title.trim()}" to member #${receiver_id}`, 'SUCCESS');
+    logAudit(currentUser.handle, itemType === 'FEEDBACK' ? 'SHARE_FEEDBACK' : 'CREATE_TASKLET', `tasklet_${info.lastInsertRowid}`, `Sent ${itemType.toLowerCase()} to member #${receiver_id}`, 'SUCCESS');
 
-    return sendJson(res, 201, { id: info.lastInsertRowid, message: 'Tasklet sent to peer!' });
+    return sendJson(res, 201, { id: info.lastInsertRowid, message: `${itemType} sent successfully!` });
   }
 
   if (pathname.startsWith('/api/tasklets/') && method === 'PATCH') {

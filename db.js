@@ -205,6 +205,14 @@ export function initDatabase() {
     db.exec('ALTER TABLE calendar_events ADD COLUMN description TEXT');
   }
 
+  try { db.exec('ALTER TABLE ballots ADD COLUMN rating INTEGER DEFAULT 5'); } catch (e) {}
+  try { db.exec('ALTER TABLE ballots ADD COLUMN candidate_member_id INTEGER'); } catch (e) {}
+  try { db.exec("ALTER TABLE tasklets ADD COLUMN type TEXT DEFAULT 'TASKLET'"); } catch (e) {}
+  try { db.exec("ALTER TABLE tasklets ADD COLUMN category TEXT DEFAULT 'GENERAL'"); } catch (e) {}
+  try { db.exec('ALTER TABLE tasklets ADD COLUMN is_anonymous INTEGER DEFAULT 0'); } catch (e) {}
+  try { db.exec('ALTER TABLE members ADD COLUMN google_sub TEXT'); } catch (e) {}
+  try { db.exec('ALTER TABLE members ADD COLUMN email TEXT'); } catch (e) {}
+
   // Ensure the 6 meeting slots exist
   const slotCount = db.prepare('SELECT COUNT(*) as count FROM meeting_slots').get();
   if (slotCount.count === 0) {

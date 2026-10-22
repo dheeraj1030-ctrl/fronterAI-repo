@@ -13,32 +13,35 @@ export async function handleVotingRoutes(req, res, pathname, method, urlObj) {
 
     const allSessions = db.prepare('SELECT id, title, description, session_type, status FROM voting_sessions ORDER BY id ASC').all();
 
-    const options = db.prepare(`
-      SELECT vo.*, m.name as candidate_name, m.role as candidate_role
-      FROM voting_options vo
-      LEFT JOIN members m ON vo.candidate_member_id = m.id
-      WHERE vo.session_id = ?
-    `).all(session.id);
+    const candidates = db.prepare('SELECT id, name, role, team_track, email FROM members WHERE is_allowed = 1 ORDER BY id ASC').all();
 
     const eligibility = currentUser
       ? db.prepare('SELECT * FROM voting_eligibility WHERE session_id = ? AND member_id = ?').get(session.id, currentUser.id)
       : null;
     
     const totalBallots = db.prepare('SELECT COUNT(*) as count FROM ballots WHERE session_id = ?').get(session.id).count;
-    const totalEligible = session.total_eligible;
+    const totalEligible = candidates.length || session.total_eligible;
 
     let tally = null;
     const isRevealed = totalBallots >= totalEligible || session.status === 'CLOSED';
 
     if (isRevealed) {
-      tally = options.map(opt => {
-        const votes = db.prepare('SELECT COUNT(*) as count FROM ballots WHERE session_id = ? AND option_id = ?')
-          .get(session.id, opt.id).count;
+      tally = candidates.map(cand => {
+        const stats = db.prepare(`
+          SELECT 
+            COUNT(*) as count,
+            AVG(rating) as avg_rating
+          FROM ballots 
+          WHERE session_id = ? AND (candidate_member_id = ? OR option_id = ?)
+        `).get(session.id, cand.id, cand.id);
+
         return {
-          option_id: opt.id,
-          label: opt.label,
-          candidate_name: opt.candidate_name,
-          votes
+          candidate_id: cand.id,
+          candidate_name: cand.name,
+          candidate_role: cand.role,
+          team_track: cand.team_track,
+          total_ratings: stats?.count || 0,
+          avg_rating: stats?.count ? (Math.round((stats.avg_rating || 0) * 10) / 10) : 0
         };
       });
     }
@@ -46,7 +49,8 @@ export async function handleVotingRoutes(req, res, pathname, method, urlObj) {
     return sendJson(res, 200, {
       session,
       allSessions,
-      options,
+      candidates,
+      options: candidates,
       userHasClaimedToken: !!eligibility,
       totalBallots,
       totalEligible,
@@ -94,10 +98,12 @@ export async function handleVotingRoutes(req, res, pathname, method, urlObj) {
   // Phase 2: Cast anonymous ballot
   if (pathname === '/api/voting/cast' && method === 'POST') {
     const body = await parseBody(req);
-    const { session_id, option_id, token } = body;
+    const { session_id, option_id, candidate_id, rating, token } = body;
+    const targetCandidateId = candidate_id || option_id;
+    const numRating = Math.max(1, Math.min(5, parseInt(rating || 5, 10)));
 
-    if (!session_id || !option_id || !token) {
-      return sendJson(res, 400, { error: 'session_id, option_id, and token are required' });
+    if (!session_id || !targetCandidateId || !token) {
+      return sendJson(res, 400, { error: 'session_id, candidate_id, and token are required' });
     }
 
     const verification = verifyBallotToken(session_id, token);
@@ -129,13 +135,18 @@ export async function handleVotingRoutes(req, res, pathname, method, urlObj) {
       new Date().toISOString()
     );
 
-    db.prepare('INSERT INTO ballots (session_id, option_id) VALUES (?, ?)').run(session_id, option_id);
+    db.prepare('INSERT INTO ballots (session_id, option_id, candidate_member_id, rating) VALUES (?, ?, ?, ?)').run(
+      session_id,
+      targetCandidateId,
+      targetCandidateId,
+      numRating
+    );
 
     logAudit(
       'anonymous_voter',
       'PEER_BALLOT_CAST',
       `voting_session_${session_id}`,
-      `Anonymous vote cast in peer performance review. Zero voter linkage.`,
+      `Anonymous rating of ${numRating}/5 stars cast in peer performance review. Zero voter linkage.`,
       'SUCCESS'
     );
 
