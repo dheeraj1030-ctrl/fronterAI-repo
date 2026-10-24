@@ -7,13 +7,22 @@ export async function handleMemberRoutes(req, res, pathname, method) {
     const currentUser = getSessionUser(req);
     let members;
     if (currentUser && currentUser.is_host) {
-      // Full administrative member details for Host
-      members = db.prepare('SELECT id, github_numeric_id, handle, name, role, team_track, is_host, is_allowed FROM members').all();
+      // Full administrative member details for Host (including pending & disabled)
+      members = db.prepare('SELECT id, github_numeric_id, handle, name, role, team_track, email, is_host, is_allowed FROM members').all();
     } else {
-      // Public/member safe projection (omit sensitive github_numeric_id)
-      members = db.prepare('SELECT id, handle, name, role, team_track, is_host FROM members').all();
+      // Public/member safe projection (only active allowed members)
+      members = db.prepare('SELECT id, handle, name, role, team_track, email, is_host FROM members WHERE is_allowed = 1').all();
     }
     return sendJson(res, 200, { members });
+  }
+
+  if (pathname === '/api/members/pending' && method === 'GET') {
+    const currentUser = getSessionUser(req);
+    if (!currentUser || !currentUser.is_host) {
+      return sendJson(res, 403, { error: 'Forbidden: Only the Team Host can view pending access requests.' });
+    }
+    const pending = db.prepare('SELECT id, handle, name, role, team_track, email, is_host, is_allowed FROM members WHERE is_allowed = 0 ORDER BY id DESC').all();
+    return sendJson(res, 200, { pending });
   }
 
   if (pathname === '/api/members' && method === 'POST') {
@@ -98,6 +107,59 @@ export async function handleMemberRoutes(req, res, pathname, method) {
     db.prepare('DELETE FROM members WHERE id = ?').run(memberId);
     logAudit(currentUser.handle, 'MEMBER_REMOVED', 'members', `Removed member @${targetMember.handle} (${targetMember.name}, ID: ${memberId}) from allowlist.`, 'SUCCESS');
     return sendJson(res, 200, { message: `Member @${targetMember.handle} removed successfully.` });
+  }
+
+  if (pathname.match(/^\/api\/members\/\d+\/approve$/) && method === 'POST') {
+    const currentUser = getSessionUser(req);
+    if (!currentUser || !currentUser.is_host) {
+      return sendJson(res, 403, { error: 'Forbidden: Only the Team Host can approve members.' });
+    }
+    const memberId = parseInt(pathname.split('/')[3], 10);
+    const targetMember = db.prepare('SELECT * FROM members WHERE id = ?').get(memberId);
+    if (!targetMember) {
+      return sendJson(res, 404, { error: 'Member not found.' });
+    }
+    const body = await parseBody(req);
+    const role = (body && body.role && body.role.trim()) || (targetMember.role === 'Pending Review' ? 'Engineer' : targetMember.role);
+    const validTrack = (body && body.team_track && ['frontend', 'backend', 'lead'].includes(body.team_track)) ? body.team_track : (targetMember.team_track === 'unassigned' ? 'backend' : targetMember.team_track);
+
+    db.prepare('UPDATE members SET is_allowed = 1, role = ?, team_track = ? WHERE id = ?').run(role, validTrack, memberId);
+
+    logAudit(
+      currentUser.handle,
+      'MEMBER_APPROVED',
+      'members',
+      `Host approved access for ${targetMember.name} (${targetMember.email || targetMember.handle}). Assigned Role: ${role}, Track: ${validTrack}.`,
+      'SUCCESS'
+    );
+
+    return sendJson(res, 200, { success: true, message: `Access approved for ${targetMember.name}!` });
+  }
+
+  if (pathname.match(/^\/api\/members\/\d+\/reject$/) && method === 'POST') {
+    const currentUser = getSessionUser(req);
+    if (!currentUser || !currentUser.is_host) {
+      return sendJson(res, 403, { error: 'Forbidden: Only the Team Host can reject requests.' });
+    }
+    const memberId = parseInt(pathname.split('/')[3], 10);
+    const targetMember = db.prepare('SELECT * FROM members WHERE id = ?').get(memberId);
+    if (!targetMember) {
+      return sendJson(res, 404, { error: 'Member not found.' });
+    }
+    if (targetMember.is_host) {
+      return sendJson(res, 400, { error: 'Host cannot be rejected.' });
+    }
+    db.prepare('DELETE FROM members WHERE id = ?').run(memberId);
+
+    logAudit(
+      currentUser.handle,
+      'MEMBER_REJECTED',
+      'members',
+      `Host rejected access request for ${targetMember.name} (${targetMember.email || targetMember.handle}).`,
+      'SUCCESS'
+    );
+
+    return sendJson(res, 200, { success: true, message: `Access request for ${targetMember.name} was rejected.` });
   }
 
   return false;

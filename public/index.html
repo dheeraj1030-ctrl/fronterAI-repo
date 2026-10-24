@@ -623,6 +623,19 @@
                 </div>
               </div>
             </div>
+            <!-- Host-Only: Pending Access Requests Queue -->
+            <div id="pending-requests-section" class="card hidden" style="margin-bottom: 16px; border: 1px solid rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.04); padding: 14px 18px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 16px;">⏳</span>
+                  <h4 style="font-size: 15px; font-weight: 600; margin: 0; color: #f59e0b;">Pending Access Requests</h4>
+                  <span class="nav-badge" id="pending-requests-count" style="background: #f59e0b; color: #000; font-weight: 700; font-size: 11px;">0</span>
+                </div>
+                <span style="font-size: 12px; color: var(--text-muted);">New users waiting for Host approval to access workspace</span>
+              </div>
+              <div id="pending-requests-list" style="display: flex; flex-direction: column; gap: 10px;"></div>
+            </div>
+
             <div class="team-roster-grid" id="team-roster-cards"></div>
           </div>
 

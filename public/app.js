@@ -71,12 +71,30 @@ async function init() {
       authAlertText.innerHTML = `<strong>Google OAuth Not Configured:</strong><br>
       Please configure <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> in Cloudflare Worker settings.`;
     }
+  } else if (params.get('auth') === 'pending_approval') {
+    const userEmail = params.get('email') || 'your account';
+    authAlert?.classList.remove('hidden');
+    if (authAlertText) {
+      authAlertText.innerHTML = `
+        <div style="text-align: left; line-height: 1.45;">
+          <strong style="color: #f59e0b; display: flex; align-items: center; gap: 6px; font-size: 13.5px;">
+            <span>⏳</span> Access Request Received
+          </strong>
+          <div style="margin-top: 4px; font-size: 12.5px;">
+            Google account <strong>${escapeHtml(userEmail)}</strong> has been registered and is waiting for <strong>Host Approval</strong>.
+          </div>
+          <div style="margin-top: 6px; font-size: 12px; color: var(--text-muted);">
+            The Team Lead has been notified to review and activate your access. Once approved, simply click <strong>"Sign in with Google"</strong> to enter.
+          </div>
+        </div>
+      `;
+    }
   } else if (params.get('error') === 'unauthorized_allowlist') {
     const userEmail = params.get('email') || 'Unknown';
     authAlert?.classList.remove('hidden');
     if (authAlertText) {
-      authAlertText.innerHTML = `<strong>403 Access Denied (Strict Allowlist Policy):</strong><br>
-      Google account <strong>${userEmail}</strong> was <strong>REJECTED</strong>. Only authorized Frontier AI team members on the allowlist can enter this platform.`;
+      authAlertText.innerHTML = `<strong>403 Access Denied:</strong><br>
+      Account <strong>${escapeHtml(userEmail)}</strong> does not have active access permissions on Frontier AI.`;
     }
   } else if (params.get('auth') === 'oauth_success') {
     showToast('Authenticated via Google OAuth 2.0!');
@@ -446,7 +464,25 @@ async function loadMembers() {
   try {
     const res = await fetch('/api/members');
     const data = await res.json();
-    state.members = data.members;
+    state.members = data.members || [];
+
+    // If current logged-in user is Host, fetch pending access requests
+    if (state.currentUser && state.currentUser.is_host === 1) {
+      try {
+        const pRes = await fetch('/api/members/pending');
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          state.pendingMembers = pData.pending || [];
+        } else {
+          state.pendingMembers = (state.members || []).filter(m => m.is_allowed === 0);
+        }
+      } catch (pe) {
+        state.pendingMembers = (state.members || []).filter(m => m.is_allowed === 0);
+      }
+    } else {
+      state.pendingMembers = [];
+    }
+
     populatePersonaDropdown();
     populateSelects();
     renderTeamRoster();
@@ -2120,18 +2156,105 @@ function renderTeamRoster() {
   const containerSettings = document.getElementById('team-roster-cards');
   const containerPeers = document.getElementById('team-roster-peers-cards');
 
+  const activeMembers = (state.members || []).filter(m => m.is_allowed !== 0);
+
   const subtitle = document.getElementById('team-roster-subtitle');
   if (subtitle) {
-    const memberCount = state.members ? state.members.length : 0;
-    subtitle.textContent = `${memberCount} Allowlisted Member${memberCount === 1 ? '' : 's'}: 1 Designated Host + ${Math.max(0, memberCount - 1)} Team Participant${memberCount === 2 ? '' : 's'}`;
+    const memberCount = activeMembers.length;
+    subtitle.textContent = `${memberCount} Active Member${memberCount === 1 ? '' : 's'}: 1 Designated Host + ${Math.max(0, memberCount - 1)} Team Participant${memberCount === 2 ? '' : 's'}`;
   }
 
   const teamBadge = document.querySelector('[data-view="view-team"] .nav-badge');
-  if (teamBadge && state.members) {
-    teamBadge.textContent = state.members.length;
+  if (teamBadge) {
+    teamBadge.textContent = activeMembers.length;
   }
 
   const isHost = state.currentUser && state.currentUser.is_host === 1;
+
+  // Pending Access Requests (Host Only)
+  const pendingSection = document.getElementById('pending-requests-section');
+  const pendingList = document.getElementById('pending-requests-list');
+  const pendingCount = document.getElementById('pending-requests-count');
+
+  if (pendingSection && pendingList) {
+    if (isHost && state.pendingMembers && state.pendingMembers.length > 0) {
+      pendingSection.classList.remove('hidden');
+      if (pendingCount) pendingCount.textContent = state.pendingMembers.length;
+      pendingList.innerHTML = '';
+
+      state.pendingMembers.forEach(pm => {
+        const item = document.createElement('div');
+        item.className = 'card';
+        item.style = 'padding: 10px 14px; background: var(--bg-surface); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border: 1px solid rgba(245, 158, 11, 0.3);';
+        item.innerHTML = `
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <div class="roster-avatar avatar-amber" style="width: 36px; height: 36px; font-size: 13px;">${getInitials(pm.name)}</div>
+            <div>
+              <div style="font-weight: 600; font-size: 13.5px;">${escapeHtml(pm.name)} <span class="nav-badge" style="background: rgba(245,158,11,0.2); color: #f59e0b;">Pending Review</span></div>
+              <div style="font-size: 12px; color: var(--text-muted);">${escapeHtml(pm.email || `@${pm.handle}`)}</div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <label style="font-size: 11px; color: var(--text-muted);">Assign Role:</label>
+            <input type="text" class="table-search pending-role-val" value="${pm.role === 'Pending Review' ? 'Software Engineer' : escapeHtml(pm.role)}" style="padding: 4px 8px; font-size: 12px; width: 140px;">
+            <label style="font-size: 11px; color: var(--text-muted);">Track:</label>
+            <select class="table-search pending-track-val" style="padding: 4px 8px; font-size: 12px; width: 100px;">
+              <option value="backend" ${pm.team_track === 'backend' ? 'selected' : ''}>Backend</option>
+              <option value="frontend" ${pm.team_track === 'frontend' ? 'selected' : ''}>Frontend</option>
+              <option value="lead" ${pm.team_track === 'lead' ? 'selected' : ''}>Lead</option>
+            </select>
+            <button class="btn btn-filled btn-sm btn-approve-request" data-id="${pm.id}" style="background: #10b981; border-color: #10b981; padding: 4px 12px;">
+              Approve
+            </button>
+            <button class="btn btn-danger btn-sm btn-reject-request" data-id="${pm.id}" style="padding: 4px 10px;">
+              Decline
+            </button>
+          </div>
+        `;
+
+        item.querySelector('.btn-approve-request')?.addEventListener('click', async () => {
+          const roleInput = item.querySelector('.pending-role-val')?.value;
+          const trackSelect = item.querySelector('.pending-track-val')?.value;
+          try {
+            const res = await fetch(`/api/members/${pm.id}/approve`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ role: roleInput, team_track: trackSelect })
+            });
+            const data = await res.json();
+            if (res.ok) {
+              showToast(`Access granted to ${pm.name}!`);
+              await loadMembers();
+            } else {
+              showToast(data.error || 'Failed to approve member', true);
+            }
+          } catch (e) {
+            showToast('Network error approving member', true);
+          }
+        });
+
+        item.querySelector('.btn-reject-request')?.addEventListener('click', async () => {
+          if (!confirm(`Reject access request for ${pm.name} (${pm.email || pm.handle})?`)) return;
+          try {
+            const res = await fetch(`/api/members/${pm.id}/reject`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) {
+              showToast(`Access request for ${pm.name} was rejected.`);
+              await loadMembers();
+            } else {
+              showToast(data.error || 'Failed to reject request', true);
+            }
+          } catch (e) {
+            showToast('Network error rejecting request', true);
+          }
+        });
+
+        pendingList.appendChild(item);
+      });
+    } else {
+      pendingSection.classList.add('hidden');
+    }
+  }
 
   const renderCard = (m, isPeersView = false) => {
     const card = document.createElement('div');
@@ -2215,12 +2338,12 @@ function renderTeamRoster() {
 
   if (containerSettings) {
     containerSettings.innerHTML = '';
-    state.members.forEach(m => containerSettings.appendChild(renderCard(m, false)));
+    activeMembers.forEach(m => containerSettings.appendChild(renderCard(m, false)));
   }
 
   if (containerPeers) {
     containerPeers.innerHTML = '';
-    state.members.forEach(m => containerPeers.appendChild(renderCard(m, true)));
+    activeMembers.forEach(m => containerPeers.appendChild(renderCard(m, true)));
   }
 }
 
@@ -2312,10 +2435,11 @@ function populateSelects() {
   const taskAssignee = document.getElementById('task-assignee');
   const calAssignee = document.getElementById('cal-assignee');
   const customMembersBox = document.getElementById('cal-member-checkboxes');
+  const activeMembers = (state.members || []).filter(m => m.is_allowed !== 0);
 
   if (taskAssignee) {
     taskAssignee.innerHTML = '';
-    state.members.forEach(m => {
+    activeMembers.forEach(m => {
       const opt = document.createElement('option');
       opt.value = m.id;
       opt.textContent = `${m.name} (${m.role})`;
@@ -2325,7 +2449,7 @@ function populateSelects() {
 
   if (calAssignee) {
     calAssignee.innerHTML = '<option value="">All Team Members (Global Ping)</option>';
-    state.members.forEach(m => {
+    activeMembers.forEach(m => {
       const opt = document.createElement('option');
       opt.value = m.id;
       opt.textContent = `${m.name} (${m.role})`;
@@ -2335,7 +2459,7 @@ function populateSelects() {
 
   if (customMembersBox) {
     customMembersBox.innerHTML = '';
-    state.members.forEach(m => {
+    activeMembers.forEach(m => {
       const label = document.createElement('label');
       label.style = 'display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: var(--text-primary);';
       label.innerHTML = `

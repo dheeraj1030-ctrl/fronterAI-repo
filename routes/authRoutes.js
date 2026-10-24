@@ -85,25 +85,56 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
 
       // Check allowlist: match by google_sub (returning users) OR email (first login)
       let member = db.prepare('SELECT * FROM members WHERE google_sub = ?').get(googleSub);
-      if (!member) {
-        member = db.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?) AND is_allowed = 1').get(googleEmail);
-        // On first login: bind google_sub to the allowlisted email record
+      if (!member && googleEmail) {
+        member = db.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?)').get(googleEmail);
+        // On first login: bind google_sub and email to the member record
         if (member) {
-          db.prepare('UPDATE members SET google_sub = ? WHERE id = ?').run(googleSub, member.id);
+          db.prepare('UPDATE members SET google_sub = ?, email = COALESCE(email, ?) WHERE id = ?').run(googleSub, googleEmail, member.id);
           member = db.prepare('SELECT * FROM members WHERE id = ?').get(member.id);
         }
       }
 
-      if (!member || !member.is_allowed) {
+      // If user is completely new (not in members table), auto-register as Pending Access Request
+      if (!member) {
+        const cleanHandle = (googleEmail.split('@')[0] || 'user').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 30);
+        let handle = cleanHandle;
+        const existingHandle = db.prepare('SELECT id FROM members WHERE LOWER(handle) = LOWER(?)').get(handle);
+        if (existingHandle) {
+          handle = `${cleanHandle}_${Math.floor(100 + Math.random() * 900)}`;
+        }
+        const displayName = googleUser.name || googleUser.given_name || cleanHandle;
+        const numericId = Math.floor(Date.now() / 1000) + Math.floor(Math.random() * 100000);
+
+        db.prepare(`
+          INSERT INTO members (github_numeric_id, handle, name, role, team_track, email, google_sub, is_host, is_allowed)
+          VALUES (?, ?, ?, 'Pending Review', 'unassigned', ?, ?, 0, 0)
+        `).run(numericId, handle, displayName, googleEmail, googleSub);
+
         logAudit(
-          `google_${googleEmail || googleSub}`,
-          'OAUTH_ALLOWLIST_DENIED',
+          `google_${googleEmail}`,
+          'ACCESS_REQUEST_SUBMITTED',
           'auth_allowlist',
-          `Google account ${googleEmail} authenticated via Google OAuth but is NOT in the Frontier AI allowlist.`,
-          'DENIED'
+          `New user ${displayName} (${googleEmail}) requested access to Frontier AI. Queued for Host approval.`,
+          'SUCCESS'
+        );
+
+        res.writeHead(302, {
+          Location: `/?auth=pending_approval&email=${encodeURIComponent(googleEmail)}`
+        });
+        return res.end();
+      }
+
+      // If user exists but is awaiting Host approval or disabled
+      if (!member.is_allowed) {
+        logAudit(
+          member.handle,
+          'LOGIN_AWAITING_APPROVAL',
+          'auth_allowlist',
+          `User ${member.name} (${googleEmail}) attempted login while access request is awaiting Host approval.`,
+          'PENDING'
         );
         res.writeHead(302, {
-          Location: `/?error=unauthorized_allowlist&email=${encodeURIComponent(googleEmail || '')}`
+          Location: `/?auth=pending_approval&email=${encodeURIComponent(googleEmail || member.email || '')}`
         });
         return res.end();
       }
@@ -136,17 +167,45 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
       return sendJson(res, 404, { error: 'Not found' });
     }
     const email = urlObj.searchParams.get('email') || 'kart123.san@gmail.com';
-    const member = db.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?) AND is_allowed = 1').get(email);
+    let member = db.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?)').get(email);
 
-    if (!member || !member.is_allowed) {
+    // If new simulated user, register as pending request
+    if (!member) {
+      const cleanHandle = (email.split('@')[0] || 'user').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 30);
+      let handle = cleanHandle;
+      const existingHandle = db.prepare('SELECT id FROM members WHERE LOWER(handle) = LOWER(?)').get(handle);
+      if (existingHandle) {
+        handle = `${cleanHandle}_${Math.floor(100 + Math.random() * 900)}`;
+      }
+      const displayName = cleanHandle;
+      const numericId = Math.floor(Date.now() / 1000) + Math.floor(Math.random() * 100000);
+      const googleSub = 'sim_' + Date.now();
+
+      db.prepare(`
+        INSERT INTO members (github_numeric_id, handle, name, role, team_track, email, google_sub, is_host, is_allowed)
+        VALUES (?, ?, ?, 'Pending Review', 'unassigned', ?, ?, 0, 0)
+      `).run(numericId, handle, displayName, email, googleSub);
+
+      logAudit(
+        `sim_${email}`,
+        'ACCESS_REQUEST_SUBMITTED',
+        'auth_allowlist',
+        `Simulated access request submitted for ${displayName} (${email}). Queued for Host approval.`,
+        'SUCCESS'
+      );
+      res.writeHead(302, { Location: `/?auth=pending_approval&email=${encodeURIComponent(email)}` });
+      return res.end();
+    }
+
+    if (!member.is_allowed) {
       logAudit(
         `google_${email}`,
-        'OAUTH_SIM_DENIED',
+        'OAUTH_SIM_PENDING',
         'auth_allowlist',
-        `Simulated Google OAuth login rejected for email: ${email}. Not in allowlist.`,
-        'DENIED'
+        `Simulated Google OAuth login checked for email: ${email}. Account is awaiting Host approval.`,
+        'PENDING'
       );
-      res.writeHead(302, { Location: `/?error=unauthorized_allowlist&email=${encodeURIComponent(email)}` });
+      res.writeHead(302, { Location: `/?auth=pending_approval&email=${encodeURIComponent(email)}` });
       return res.end();
     }
 

@@ -225,10 +225,10 @@ export async function onRequest(context) {
         member = await env.DB.prepare('SELECT * FROM members WHERE google_sub = ?').bind(googleSub).first();
       } catch (e) {}
 
-      // 2. By email (first login)
+      // 2. By email
       if (!member && googleEmail) {
         try {
-          member = await env.DB.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?) AND is_allowed = 1').bind(googleEmail).first();
+          member = await env.DB.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?)').bind(googleEmail).first();
         } catch (e) {}
       }
 
@@ -249,10 +249,35 @@ export async function onRequest(context) {
         } catch (e) {}
       }
 
-      if (!member || !member.is_allowed) {
-        await logAudit(env, `google_${googleEmail}`, 'OAUTH_ALLOWLIST_DENIED', 'auth',
-          `Google account ${googleEmail} not in Frontier AI allowlist.`, 'DENIED');
-        return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?error=unauthorized_allowlist&email=${encodeURIComponent(googleEmail || '')}` } });
+      // 4. If completely new user, record as Pending Access Request
+      if (!member) {
+        const cleanHandle = (googleEmail.split('@')[0] || 'user').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 30);
+        const displayName = googleUser.name || googleUser.given_name || cleanHandle;
+        const numericId = Math.floor(Date.now() / 1000) + Math.floor(Math.random() * 100000);
+        try {
+          await env.DB.prepare(`
+            INSERT INTO members (github_numeric_id, handle, name, role, team_track, email, google_sub, is_host, is_allowed)
+            VALUES (?, ?, ?, 'Pending Review', 'unassigned', ?, ?, 0, 0)
+          `).bind(numericId, cleanHandle, displayName, googleEmail, googleSub).run();
+        } catch (e) {
+          try {
+            await env.DB.prepare(`
+              INSERT INTO members (handle, name, role, team_track, email, google_sub, is_host, is_allowed)
+              VALUES (?, ?, 'Pending Review', 'unassigned', ?, ?, 0, 0)
+            `).bind(cleanHandle, displayName, googleEmail, googleSub).run();
+          } catch (e2) {}
+        }
+
+        await logAudit(env, `google_${googleEmail}`, 'ACCESS_REQUEST_SUBMITTED', 'auth',
+          `New user ${displayName} (${googleEmail}) requested access to workspace. Queued for Host approval.`, 'SUCCESS');
+
+        return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?auth=pending_approval&email=${encodeURIComponent(googleEmail || '')}` } });
+      }
+
+      if (!member.is_allowed) {
+        await logAudit(env, member.handle, 'LOGIN_AWAITING_APPROVAL', 'auth',
+          `User ${member.name} (${googleEmail}) attempted login while access request is awaiting Host approval.`, 'PENDING');
+        return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?auth=pending_approval&email=${encodeURIComponent(googleEmail || '')}` } });
       }
 
       // Issue session
@@ -372,8 +397,41 @@ export async function onRequest(context) {
     // 4. MEMBERS ROSTER
     // --------------------------------------------------------------------------
     if (pathname === '/api/members' && method === 'GET') {
-      const res = await env.DB.prepare('SELECT id, handle, name, role, team_track, is_host, is_allowed, email FROM members WHERE is_allowed = 1').all();
+      const authUser = await getAuthMember(request, env);
+      let query = 'SELECT id, handle, name, role, team_track, is_host, is_allowed, email FROM members WHERE is_allowed = 1';
+      if (authUser && authUser.is_host) {
+        query = 'SELECT id, handle, name, role, team_track, is_host, is_allowed, email FROM members';
+      }
+      const res = await env.DB.prepare(query).all();
       return jsonResponse({ members: res.results || [] });
+    }
+
+    if (pathname === '/api/members/pending' && method === 'GET') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Only Team Lead can view pending access requests' }, 403);
+      const res = await env.DB.prepare('SELECT id, handle, name, role, team_track, is_host, is_allowed, email FROM members WHERE is_allowed = 0 ORDER BY id DESC').all();
+      return jsonResponse({ pending: res.results || [] });
+    }
+
+    if (pathname.match(/^\/api\/members\/\d+\/approve$/) && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Only Team Lead can approve members' }, 403);
+      const targetId = pathname.split('/')[3];
+      const body = await request.json().catch(() => ({}));
+      const role = (body && body.role && body.role.trim()) || 'Engineer';
+      const teamTrack = (body && body.team_track) || 'backend';
+      await env.DB.prepare('UPDATE members SET is_allowed = 1, role = ?, team_track = ? WHERE id = ?').bind(role, teamTrack, targetId).run();
+      await logAudit(env, member.handle, 'MEMBER_APPROVED', 'members', `Approved member #${targetId} as ${role} [${teamTrack}]`);
+      return jsonResponse({ success: true, message: 'Member approved successfully' });
+    }
+
+    if (pathname.match(/^\/api\/members\/\d+\/reject$/) && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Only Team Lead can reject members' }, 403);
+      const targetId = pathname.split('/')[3];
+      await env.DB.prepare('DELETE FROM members WHERE id = ?').bind(targetId).run();
+      await logAudit(env, member.handle, 'MEMBER_REJECTED', 'members', `Rejected access request for member #${targetId}`);
+      return jsonResponse({ success: true, message: 'Access request rejected' });
     }
 
     if (pathname === '/api/members' && method === 'POST') {
