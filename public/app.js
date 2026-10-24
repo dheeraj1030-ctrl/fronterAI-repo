@@ -2184,31 +2184,39 @@ function renderTeamRoster() {
 
       state.pendingMembers.forEach(pm => {
         const item = document.createElement('div');
-        item.className = 'card';
-        item.style = 'padding: 10px 14px; background: var(--bg-surface); display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; border: 1px solid rgba(245, 158, 11, 0.3);';
+        item.className = 'pending-member-row';
         item.innerHTML = `
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <div class="roster-avatar avatar-amber" style="width: 36px; height: 36px; font-size: 13px;">${getInitials(pm.name)}</div>
+          <div class="pending-member-info">
+            <div class="roster-avatar avatar-amber" style="width: 38px; height: 38px; font-size: 13px;">${getInitials(pm.name)}</div>
             <div>
-              <div style="font-weight: 600; font-size: 13.5px;">${escapeHtml(pm.name)} <span class="nav-badge" style="background: rgba(245,158,11,0.2); color: #f59e0b;">Pending Review</span></div>
-              <div style="font-size: 12px; color: var(--text-muted);">${escapeHtml(pm.email || `@${pm.handle}`)}</div>
+              <div class="pending-member-name">
+                ${escapeHtml(pm.name)}
+                <span class="tag-pending-review">Pending Review</span>
+              </div>
+              <div class="pending-member-email">${escapeHtml(pm.email || `@${pm.handle}`)}</div>
             </div>
           </div>
-          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-            <label style="font-size: 11px; color: var(--text-muted);">Assign Role:</label>
-            <input type="text" class="table-search pending-role-val" value="${pm.role === 'Pending Review' ? 'Software Engineer' : escapeHtml(pm.role)}" style="padding: 4px 8px; font-size: 12px; width: 140px;">
-            <label style="font-size: 11px; color: var(--text-muted);">Track:</label>
-            <select class="table-search pending-track-val" style="padding: 4px 8px; font-size: 12px; width: 100px;">
-              <option value="backend" ${pm.team_track === 'backend' ? 'selected' : ''}>Backend</option>
-              <option value="frontend" ${pm.team_track === 'frontend' ? 'selected' : ''}>Frontend</option>
-              <option value="lead" ${pm.team_track === 'lead' ? 'selected' : ''}>Lead</option>
-            </select>
-            <button class="btn btn-filled btn-sm btn-approve-request" data-id="${pm.id}" style="background: #10b981; border-color: #10b981; padding: 4px 12px;">
-              Approve
-            </button>
-            <button class="btn btn-danger btn-sm btn-reject-request" data-id="${pm.id}" style="padding: 4px 10px;">
-              Decline
-            </button>
+          <div class="pending-member-controls">
+            <div class="control-group">
+              <span class="control-label">Role:</span>
+              <input type="text" class="input-material pending-role-val" value="${pm.role === 'Pending Review' ? 'Software Engineer' : escapeHtml(pm.role)}">
+            </div>
+            <div class="control-group">
+              <span class="control-label">Track:</span>
+              <select class="select-material pending-track-val">
+                <option value="backend" ${pm.team_track === 'backend' ? 'selected' : ''}>Backend</option>
+                <option value="frontend" ${pm.team_track === 'frontend' ? 'selected' : ''}>Frontend</option>
+                <option value="lead" ${pm.team_track === 'lead' ? 'selected' : ''}>Lead</option>
+              </select>
+            </div>
+            <div class="pending-action-btns">
+              <button class="btn btn-m3-approve btn-approve-request" data-id="${pm.id}">
+                Approve
+              </button>
+              <button class="btn btn-m3-decline btn-reject-request" data-id="${pm.id}">
+                Decline
+              </button>
+            </div>
           </div>
         `;
 
