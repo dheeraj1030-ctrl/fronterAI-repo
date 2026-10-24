@@ -1075,14 +1075,45 @@ export async function onRequest(context) {
 
       // Build Tier 1 dynamic context from D1
       const lower = message.toLowerCase();
-      let tasksContext = '';
-      if (/task|todo|progress|deliverable|deadline|work|sprint|status/.test(lower) || lower.length < 15) {
-        const tasks = await env.DB.prepare('SELECT title, track, status, deadline FROM tasks ORDER BY id ASC LIMIT 15').all();
-        tasksContext = '\nActive Sprint Tasks:\n' + (tasks.results || []).map(t => `- [${t.status}] ${t.title} (${t.track})${t.deadline ? ' due ' + t.deadline : ''}`).join('\n');
+
+      // 1. Live Team Roster from D1
+      let teamRosterContext = '';
+      try {
+        const membersRes = await env.DB.prepare(
+          'SELECT name, handle, role, team_track, email, is_host FROM members WHERE is_allowed = 1 ORDER BY is_host DESC, id ASC'
+        ).all();
+        const activeMembers = membersRes.results || [];
+        if (activeMembers.length > 0) {
+          teamRosterContext = '\nActive Team Roster:\n' + activeMembers.map(m => 
+            `- ${m.name} (@${m.handle || (m.email ? m.email.split('@')[0] : 'user')}): ${m.role} [Track: ${m.team_track || 'General'}]${m.is_host ? ' (Team Host & Lead)' : ''}`
+          ).join('\n');
+        }
+      } catch (err) {
+        console.error('Failed to load team roster for AI Oracle:', err);
       }
 
+      // 2. Active Sprint Tasks
+      let tasksContext = '';
+      if (/task|todo|progress|deliverable|deadline|work|sprint|status|who|assign/.test(lower) || lower.length < 20) {
+        try {
+          const tasks = await env.DB.prepare(`
+            SELECT t.title, t.track, t.status, t.deadline, m.name as assignee_name
+            FROM tasks t
+            LEFT JOIN members m ON t.assignee_id = m.id
+            ORDER BY t.id ASC LIMIT 15
+          `).all();
+          tasksContext = '\nActive Sprint Tasks:\n' + (tasks.results || []).map(t => 
+            `- [${t.status}] ${t.title} (${t.track})${t.assignee_name ? ' [Assigned to: ' + t.assignee_name + ']' : ''}${t.deadline ? ' due ' + t.deadline : ''}`
+          ).join('\n');
+        } catch (e) {
+          const tasks = await env.DB.prepare('SELECT title, track, status, deadline FROM tasks ORDER BY id ASC LIMIT 15').all();
+          tasksContext = '\nActive Sprint Tasks:\n' + (tasks.results || []).map(t => `- [${t.status}] ${t.title} (${t.track})${t.deadline ? ' due ' + t.deadline : ''}`).join('\n');
+        }
+      }
+
+      // 3. Meeting Bridges
       let calContext = '';
-      if (/meet|call|sync|calendar|slot|bridge|schedule|google|today|event/.test(lower) || lower.length < 15) {
+      if (/meet|call|sync|calendar|slot|bridge|schedule|google|today|event/.test(lower) || lower.length < 20) {
         const slots = await env.DB.prepare('SELECT slot_name, slot_code FROM meeting_slots LIMIT 6').all();
         calContext = '\nMeeting Bridges:\n' + (slots.results || []).map(s => `- ${s.slot_name} (${s.slot_code})`).join('\n');
       }
@@ -1093,8 +1124,15 @@ export async function onRequest(context) {
       } catch (e) {}
 
       const systemPrompt = `You are Frontier Oracle, the AI project assistant for the Frontier AI engineering workspace.
-Current User: ${member.name} (@${member.handle}) — ${member.role}${memory?.memory_data ? '\nUser Profile: ' + memory.memory_data : ''}${tasksContext}${calContext}
-Be concise, authoritative, and strictly grounded in the workspace data. Answer clearly using plain text or brief markdown highlights.`;
+Current User: ${member.name} (@${member.handle || member.email}) — ${member.role}${memory?.memory_data ? '\nUser Profile: ' + memory.memory_data : ''}
+${teamRosterContext}
+${tasksContext}
+${calContext}
+
+GUIDELINES:
+1. Provide concise, direct, authoritative answers grounded strictly in the workspace data and Active Team Roster above.
+2. If asked who is on the team or what someone's track/role is, always consult and report from the Active Team Roster.
+3. Use clean markdown formatting (bullet points, bold highlights).`;
 
       let modelReply = '';
       let groqDiagnostic = null;
@@ -1158,7 +1196,12 @@ Be concise, authoritative, and strictly grounded in the workspace data. Answer c
 
       // Intelligent offline fallback
       if (!modelReply) {
-        if (lower.includes('task') || lower.includes('todo') || lower.includes('sprint')) {
+        if (lower.includes('member') || lower.includes('team') || lower.includes('who') || lower.includes('roster') || lower.includes('track')) {
+          const membersRes = await env.DB.prepare('SELECT name, role, team_track, is_host FROM members WHERE is_allowed = 1').all();
+          modelReply = `Active Team Roster:\n` +
+            (membersRes.results || []).map(m => `• **${m.name}** — ${m.role} [Track: ${m.team_track || 'General'}]${m.is_host ? ' (Team Host & Lead)' : ''}`).join('\n') +
+            (groqDiagnostic ? `\n\n[Notice: ${groqDiagnostic}]` : '');
+        } else if (lower.includes('task') || lower.includes('todo') || lower.includes('sprint')) {
           const tasks = await env.DB.prepare('SELECT title, track, status, deadline FROM tasks LIMIT 15').all();
           modelReply = `Active workspace tasks:\n` +
             (tasks.results || []).map(t => `• ${t.title} — ${t.status} (${t.track})`).join('\n') +
