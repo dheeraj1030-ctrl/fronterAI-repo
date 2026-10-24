@@ -337,21 +337,11 @@ function switchView(viewId) {
 // ACTUAL LOGIN UI & ROLE SEGMENTATION LOGIC
 // -------------------------------------------------------------
 function setupAuthScreen() {
-  // Google OAuth button debounce / anti-double-click
+  // Visual feedback on Google OAuth sign-in click without blocking navigation
   const btnGoogle = document.getElementById('btn-google-oauth');
-  btnGoogle?.addEventListener('click', (e) => {
-    if (btnGoogle.dataset.navigating === 'true') {
-      e.preventDefault();
-      return;
-    }
-    btnGoogle.dataset.navigating = 'true';
+  btnGoogle?.addEventListener('click', () => {
     btnGoogle.style.opacity = '0.7';
-    btnGoogle.style.pointerEvents = 'none';
-    setTimeout(() => {
-      btnGoogle.dataset.navigating = 'false';
-      btnGoogle.style.opacity = '1';
-      btnGoogle.style.pointerEvents = 'auto';
-    }, 5000);
+    btnGoogle.style.cursor = 'wait';
   });
 
   // Login Form Submission
