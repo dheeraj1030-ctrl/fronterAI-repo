@@ -83,14 +83,37 @@ async function ensureSchema(env) {
   } catch (e) {}
 }
 
+async function createSignedState(secret) {
+  const nonce = crypto.randomUUID().replace(/-/g, '');
+  const ts = Date.now().toString();
+  const sig = await hmacSha256(secret, `${nonce}.${ts}`);
+  return `${nonce}.${ts}.${sig}`;
+}
+
+async function verifySignedState(secret, stateToken) {
+  if (!stateToken || typeof stateToken !== 'string') return false;
+  const parts = stateToken.split('.');
+  if (parts.length !== 3) return false;
+  const [nonce, tsStr, sig] = parts;
+  const ts = parseInt(tsStr, 10);
+  if (isNaN(ts)) return false;
+  // 15-minute validity window
+  if (Date.now() - ts > 15 * 60 * 1000 || ts > Date.now() + 60 * 1000) return false;
+  const expectedSig = await hmacSha256(secret, `${nonce}.${tsStr}`);
+  return sig === expectedSig;
+}
+
 async function getAuthMember(request, env) {
+  const authHeader = request.headers.get('Authorization') || request.headers.get('authorization') || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
   const cookies = parseCookies(request);
-  const token = cookies.frontier_session;
+  const token = bearerToken || cookies.frontier_session;
   if (!token || !env.DB) return null;
   try {
+    const nowIso = new Date().toISOString();
     const session = await env.DB.prepare(
-      "SELECT member_id FROM sessions WHERE token = ? AND expires_at > datetime('now')"
-    ).bind(token).first();
+      "SELECT member_id FROM sessions WHERE token = ? AND (expires_at > datetime('now') OR expires_at > ?)"
+    ).bind(token, nowIso).first();
     if (!session) return null;
     return await env.DB.prepare(
       'SELECT * FROM members WHERE id = ? AND is_allowed = 1'
@@ -146,10 +169,14 @@ export async function onRequest(context) {
     // --------------------------------------------------------------------------
     if ((pathname === '/api/auth/current' || pathname === '/api/auth/session') && method === 'GET') {
       const member = await getAuthMember(request, env);
+      const authHeader = request.headers.get('Authorization') || request.headers.get('authorization') || '';
+      const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+      const token = bearerToken || cookies.frontier_session || null;
       return jsonResponse({
         authenticated: !!member,
         member: member || null,
         user: member || null,
+        token: member ? token : null,
         oauthConfigured: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET)
       });
     }
@@ -161,7 +188,8 @@ export async function onRequest(context) {
       const clientId = env.GOOGLE_CLIENT_ID || '33531224866-tci0079quk7mfgh7plhtgnpj6lfa96ou.apps.googleusercontent.com';
       if (!clientId) return jsonResponse({ error: 'GOOGLE_CLIENT_ID not configured on Cloudflare' }, 500);
 
-      const state = crypto.randomUUID();
+      const secret = env.JWT_SECRET || env.GOOGLE_CLIENT_SECRET || 'frontier-oauth-secret-key-salt-32ch';
+      const state = await createSignedState(secret);
       const redirectUri = `${url.origin}/api/auth/google/callback`;
       const googleUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${clientId}` +
@@ -171,12 +199,13 @@ export async function onRequest(context) {
         `&access_type=offline` +
         `&state=${state}`;
 
+      const headers = new Headers();
+      headers.set('Location', googleUrl);
+      headers.append('Set-Cookie', `oauth_state=${state}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`);
+
       return new Response(null, {
         status: 302,
-        headers: {
-          'Location': googleUrl,
-          'Set-Cookie': `oauth_state=${state}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`
-        }
+        headers
       });
     }
 
@@ -186,8 +215,12 @@ export async function onRequest(context) {
       const oauthError = url.searchParams.get('error');
 
       if (oauthError) return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?error=${encodeURIComponent(oauthError)}` } });
-      if (!state || state !== cookies.oauth_state) {
-        await logAudit(env, 'anonymous', 'OAUTH_CSRF_FAILED', 'auth', 'Google OAuth state mismatch', 'DENIED');
+
+      const secret = env.JWT_SECRET || env.GOOGLE_CLIENT_SECRET || 'frontier-oauth-secret-key-salt-32ch';
+      const isStateValid = (await verifySignedState(secret, state)) || (cookies.oauth_state && state === cookies.oauth_state);
+
+      if (!state || !isStateValid) {
+        await logAudit(env, 'anonymous', 'OAUTH_CSRF_FAILED', 'auth', 'Google OAuth state mismatch or expired', 'DENIED');
         return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?error=csrf_state_mismatch` } });
       }
 
@@ -280,28 +313,37 @@ export async function onRequest(context) {
         return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?auth=pending_approval&email=${encodeURIComponent(googleEmail || '')}` } });
       }
 
-      // Issue session
+      // Issue session (30-day persistence)
       const sessionToken = crypto.randomUUID() + '-' + crypto.randomUUID();
-      const expiresAt = new Date(Date.now() + 86400000 * 7).toISOString();
+      const expiresAt = new Date(Date.now() + 86400000 * 30).toISOString();
       await env.DB.prepare("INSERT INTO sessions (token, member_id, created_at, expires_at) VALUES (?, ?, datetime('now'), ?)").bind(sessionToken, member.id, expiresAt).run();
       await logAudit(env, member.handle, 'OAUTH_LOGIN_SUCCESS', 'auth',
         `Google OAuth login: ${member.name} (${googleEmail}). Role: ${member.is_host ? 'AUTHORATOR' : 'PARTICIPANT'}.`, 'SUCCESS');
 
+      const headers = new Headers();
+      headers.set('Location', `${url.origin}/?auth=oauth_success&sid=${sessionToken}`);
+      headers.append('Set-Cookie', `frontier_session=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`);
+      headers.append('Set-Cookie', `oauth_state=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+
       return new Response(null, {
         status: 302,
-        headers: {
-          'Location': `${url.origin}/`,
-          'Set-Cookie': `frontier_session=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`
-        }
+        headers
       });
     }
 
     if (pathname === '/api/auth/logout' && method === 'POST') {
-      if (cookies.frontier_session) {
-        await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(cookies.frontier_session).run();
+      const authHeader = request.headers.get('Authorization') || request.headers.get('authorization') || '';
+      const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+      const token = bearerToken || cookies.frontier_session;
+      if (token) {
+        await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
       }
-      return jsonResponse({ success: true }, 200, {
-        'Set-Cookie': 'frontier_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'
+      const headers = new Headers();
+      headers.set('Content-Type', 'application/json');
+      headers.append('Set-Cookie', 'frontier_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0');
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers
       });
     }
 

@@ -9,7 +9,7 @@ export function generateSessionToken() {
 export function createSession(member) {
   const token = generateSessionToken();
   const createdAt = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + 86400 * 1000).toISOString(); // 24 hours
+  const expiresAt = new Date(Date.now() + 86400000 * 30).toISOString(); // 30 days
   db.prepare('INSERT INTO sessions (token, member_id, created_at, expires_at) VALUES (?, ?, ?, ?)').run(
     token,
     member.id,
@@ -21,11 +21,14 @@ export function createSession(member) {
 
 export function getSessionUser(req) {
   const cookies = parseCookies(req);
-  const token = cookies.frontier_session;
+  let token = cookies.frontier_session;
+  if (!token && req.headers && req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
+    token = req.headers.authorization.substring(7).trim();
+  }
   if (!token) return null;
   const now = new Date().toISOString();
   const row = db.prepare(`
-    SELECT m.id, m.github_numeric_id, m.handle, m.name, m.role, m.team_track, m.is_host, m.is_allowed
+    SELECT m.id, m.github_numeric_id, m.handle, m.name, m.role, m.team_track, m.email, m.is_host, m.is_allowed
     FROM sessions s
     JOIN members m ON s.member_id = m.id
     WHERE s.token = ? AND s.expires_at > ?

@@ -3,6 +3,31 @@
  * Personal vs. Global Dashboards, Host Authorization, Calendar & Peer Performance Voting
  */
 
+// Universal fetch interceptor for dual-persistent sessions (Bearer token + Cookie)
+const originalFetch = window.fetch;
+window.fetch = function (resource, options = {}) {
+  const token = localStorage.getItem('frontier_session');
+  if (token) {
+    options = options || {};
+    if (!options.headers) {
+      options.headers = { 'Authorization': `Bearer ${token}` };
+    } else if (options.headers instanceof Headers) {
+      if (!options.headers.has('Authorization')) {
+        options.headers.set('Authorization', `Bearer ${token}`);
+      }
+    } else if (Array.isArray(options.headers)) {
+      if (!options.headers.some(([k]) => k.toLowerCase() === 'authorization')) {
+        options.headers.push(['Authorization', `Bearer ${token}`]);
+      }
+    } else {
+      if (!options.headers['Authorization'] && !options.headers['authorization']) {
+        options.headers['Authorization'] = `Bearer ${token}`;
+      }
+    }
+  }
+  return originalFetch.call(this, resource, options);
+};
+
 const state = {
   currentUser: null,
   members: [],
@@ -62,6 +87,11 @@ async function init() {
 
   // Check URL query parameters for OAuth callbacks and alerts
   const params = new URLSearchParams(window.location.search);
+  const sid = params.get('sid');
+  if (sid) {
+    localStorage.setItem('frontier_session', sid);
+  }
+
   const authAlert = document.getElementById('auth-alert');
   const authAlertText = document.getElementById('auth-alert-text');
 
@@ -70,6 +100,12 @@ async function init() {
     if (authAlertText) {
       authAlertText.innerHTML = `<strong>Google OAuth Not Configured:</strong><br>
       Please configure <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> in Cloudflare Worker settings.`;
+    }
+  } else if (params.get('error') === 'csrf_state_mismatch') {
+    authAlert?.classList.remove('hidden');
+    if (authAlertText) {
+      authAlertText.innerHTML = `<strong>Sign-in Session Expired:</strong><br>
+      The browser session timed out or was interrupted. Please click <strong>"Sign in with Google"</strong> again to continue.`;
     }
   } else if (params.get('auth') === 'pending_approval') {
     const userEmail = params.get('email') || 'your account';
@@ -100,12 +136,12 @@ async function init() {
     showToast('Authenticated via Google OAuth 2.0!');
   }
 
-  if (params.has('error') || params.has('auth')) {
+  if (params.has('error') || params.has('auth') || params.has('sid')) {
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 
-  await loadMembers();
   await loadCurrentAuth();
+  await loadMembers();
 
   if (state.currentUser) {
     showWorkspace();
@@ -301,6 +337,23 @@ function switchView(viewId) {
 // ACTUAL LOGIN UI & ROLE SEGMENTATION LOGIC
 // -------------------------------------------------------------
 function setupAuthScreen() {
+  // Google OAuth button debounce / anti-double-click
+  const btnGoogle = document.getElementById('btn-google-oauth');
+  btnGoogle?.addEventListener('click', (e) => {
+    if (btnGoogle.dataset.navigating === 'true') {
+      e.preventDefault();
+      return;
+    }
+    btnGoogle.dataset.navigating = 'true';
+    btnGoogle.style.opacity = '0.7';
+    btnGoogle.style.pointerEvents = 'none';
+    setTimeout(() => {
+      btnGoogle.dataset.navigating = 'false';
+      btnGoogle.style.opacity = '1';
+      btnGoogle.style.pointerEvents = 'auto';
+    }, 5000);
+  });
+
   // Login Form Submission
   const formLogin = document.getElementById('form-login');
   formLogin?.addEventListener('submit', async (e) => {
@@ -322,13 +375,12 @@ function setupAuthScreen() {
   document.getElementById('btn-header-signout')?.addEventListener('click', async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-      state.currentUser = null;
-      document.getElementById('persona-dropdown-menu')?.classList.add('hidden');
-      showToast('You have been signed out.');
-      showAuthScreen();
-    } catch (err) {
-      showToast('Error signing out', true);
-    }
+    } catch (err) {}
+    localStorage.removeItem('frontier_session');
+    state.currentUser = null;
+    document.getElementById('persona-dropdown-menu')?.classList.add('hidden');
+    showToast('You have been signed out.');
+    showAuthScreen();
   });
 }
 
@@ -348,6 +400,9 @@ async function submitLogin(identifier) {
     }
 
     state.currentUser = data.user;
+    if (data.token) {
+      localStorage.setItem('frontier_session', data.token);
+    }
     updateHeaderUserChip();
     populatePersonaDropdown();
     showToast(`Signed in as ${state.currentUser.name} (${state.currentUser.is_host ? 'Team Lead' : 'Team Member'}).`);
@@ -453,7 +508,14 @@ async function loadCurrentAuth() {
     if (res.ok) {
       const data = await res.json();
       state.currentUser = data.user || data.member || null;
+      if (data.token) {
+        localStorage.setItem('frontier_session', data.token);
+      } else if (!state.currentUser) {
+        localStorage.removeItem('frontier_session');
+      }
       updateHeaderUserChip();
+    } else {
+      localStorage.removeItem('frontier_session');
     }
   } catch (err) {
     console.error('Failed to load current auth:', err);

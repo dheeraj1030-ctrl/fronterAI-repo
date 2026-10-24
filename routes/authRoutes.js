@@ -4,12 +4,40 @@ import { getSessionUser, createSession, destroySession } from '../middleware/ses
 import { parseCookies, parseBody, sendJson } from '../middleware/httpHelpers.js';
 import { BASE_URL, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, isProduction } from '../config.js';
 
+function createSignedState(secret) {
+  const nonce = crypto.randomBytes(16).toString('hex');
+  const ts = Date.now().toString();
+  const sig = crypto.createHmac('sha256', secret).update(`${nonce}.${ts}`).digest('hex');
+  return `${nonce}.${ts}.${sig}`;
+}
+
+function verifySignedState(secret, stateToken) {
+  if (!stateToken || typeof stateToken !== 'string') return false;
+  const parts = stateToken.split('.');
+  if (parts.length !== 3) return false;
+  const [nonce, tsStr, sig] = parts;
+  const ts = parseInt(tsStr, 10);
+  if (isNaN(ts)) return false;
+  if (Date.now() - ts > 15 * 60 * 1000 || ts > Date.now() + 60 * 1000) return false;
+  const expectedSig = crypto.createHmac('sha256', secret).update(`${nonce}.${tsStr}`).digest('hex');
+  return sig === expectedSig;
+}
+
 export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
   const cookies = parseCookies(req);
 
   if (pathname === '/api/auth/current' && method === 'GET') {
     const currentUser = getSessionUser(req);
-    return sendJson(res, 200, { user: currentUser, oauthConfigured: !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET) });
+    const authHeader = req.headers.authorization || '';
+    const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    const token = bearerToken || cookies.frontier_session || null;
+    return sendJson(res, 200, {
+      authenticated: !!currentUser,
+      user: currentUser,
+      member: currentUser,
+      token: currentUser ? token : null,
+      oauthConfigured: !!(GOOGLE_CLIENT_ID && GOOGLE_CLIENT_SECRET)
+    });
   }
 
   // -------------------------------------------------------------
@@ -21,7 +49,8 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
       return res.end();
     }
 
-    const state = crypto.randomBytes(16).toString('hex');
+    const secret = GOOGLE_CLIENT_SECRET || 'frontier-oauth-secret-key-salt-32ch';
+    const state = createSignedState(secret);
     const redirectUri = `${BASE_URL}/api/auth/google/callback`;
     const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
       `client_id=${GOOGLE_CLIENT_ID}` +
@@ -33,7 +62,7 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
 
     res.writeHead(302, {
       'Location': googleAuthUrl,
-      'Set-Cookie': `oauth_state=${state}; HttpOnly; Path=/; SameSite=Lax; Max-Age=600`
+      'Set-Cookie': `oauth_state=${state}; HttpOnly; Path=/; SameSite=Lax; Max-Age=900`
     });
     return res.end();
   }
@@ -48,8 +77,11 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
       return res.end();
     }
 
-    if (!state || state !== cookies.oauth_state) {
-      logAudit('anonymous', 'OAUTH_CSRF_FAILED', 'auth_oauth', 'Google OAuth state parameter mismatch or missing state cookie.', 'DENIED');
+    const secret = GOOGLE_CLIENT_SECRET || 'frontier-oauth-secret-key-salt-32ch';
+    const isStateValid = verifySignedState(secret, state) || (cookies.oauth_state && state === cookies.oauth_state);
+
+    if (!state || !isStateValid) {
+      logAudit('anonymous', 'OAUTH_CSRF_FAILED', 'auth_oauth', 'Google OAuth state parameter mismatch or expired.', 'DENIED');
       res.writeHead(302, { Location: '/?error=csrf_state_mismatch' });
       return res.end();
     }
@@ -149,8 +181,11 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
       );
 
       res.writeHead(302, {
-        'Location': '/?auth=oauth_success',
-        'Set-Cookie': `frontier_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
+        'Location': `/?auth=oauth_success&sid=${sessionToken}`,
+        'Set-Cookie': [
+          `frontier_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`,
+          `oauth_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+        ]
       });
       return res.end();
 
@@ -218,14 +253,19 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
       'SUCCESS'
     );
     res.writeHead(302, {
-      'Location': '/?auth=oauth_success',
-      'Set-Cookie': `frontier_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=86400`
+      'Location': `/?auth=oauth_success&sid=${sessionToken}`,
+      'Set-Cookie': [
+        `frontier_session=${sessionToken}; Path=/; HttpOnly; SameSite=Lax; Max-Age=2592000`,
+        `oauth_state=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`
+      ]
     });
     return res.end();
   }
 
   if (pathname === '/api/auth/logout' && method === 'POST') {
-    const logoutToken = cookies.frontier_session;
+    const authHeader = req.headers.authorization || '';
+    const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+    const logoutToken = bearerToken || cookies.frontier_session;
     const logoutUser = getSessionUser(req);
     if (logoutUser) {
       logAudit(logoutUser.handle, 'LOGOUT', 'auth_session', 'User signed out.', 'SUCCESS');
