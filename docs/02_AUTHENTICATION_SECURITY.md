@@ -155,3 +155,27 @@ CREATE TABLE audit_logs (
   - Two-person access ticket creation and peer approvals.
   - Database snapshot generations.
 - **Lead-Only Access:** Authenticated endpoints strictly gate log visibility to `currentUser.is_host === 1`.
+
+---
+
+## 6. Google OAuth 2.0, Stateless HMAC-SHA256 & Dual-Persistence Architecture
+
+For modern zero-trust enterprise and Google Workspace environments, Frontier AI implements Google OAuth 2.0 alongside GitHub authentication:
+
+### 6.1 Stateless HMAC-SHA256 OAuth CSRF Protection
+Rather than storing `oauth_state` in volatile cross-site cookies that are frequently partitioned or stripped during external identity provider redirects, the server issues a self-verifying cryptographic state:
+$$\text{state} = \text{nonce} \,.\, \text{timestamp} \,.\, \text{HMAC-SHA256}(\text{secret}, \text{nonce} + \text{timestamp})$$
+- **Immune to multi-click race conditions:** Any valid state generated within a 15-minute sliding window is accepted.
+- **Zero cross-site cookie dependency:** Does not fail when modern privacy shields (Safari ITP, Chrome Incognito, Brave) isolate third-party cookies.
+
+### 6.2 Dual-Persistence Session Engine (Bearer + Cookie)
+To guarantee persistent sessions across browser restarts, subdomains (`*.pages.dev`), and iframe embeddings:
+1. **Server Channel:** Sets a 30-day `HttpOnly; SameSite=Lax; Secure` session cookie.
+2. **Client Channel:** Returns `sid` in the OAuth redirect URL, which is saved in `localStorage`.
+3. **Universal Fetch Interceptor:** Automatically injects `Authorization: Bearer <token>` on all outbound `/api/` calls.
+4. **Server Resolution:** Backends inspect `Authorization: Bearer <token>` first, falling back to `cookies.frontier_session`.
+
+### 6.3 Dynamic Access Requests & Host Approval Workflow
+Instead of rigid hardcoded account lists, unlisted Google accounts are placed into a `Pending Review` state (`is_allowed = 0`). The Team Lead receives real-time pending badges and can approve or deny access directly within the platform.
+
+*(For the complete technical post-mortem, mathematical formulation, and codebase diff, refer to [09. OAuth & Session Persistence Fixes](09_OAUTH_AUTHENTICATION_AND_PERSISTENCE_FIXES.md).)*
