@@ -621,7 +621,6 @@ function setupNavigation() {
 
 
 
-<<<<<<< Updated upstream
   // Settings & Logs Subtabs
   document.querySelectorAll('#settings-subtabs .segmented-tab').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -631,8 +630,19 @@ function setupNavigation() {
         showToast('Team Lead Only: The administrative audit trail is restricted to the Team Lead.', true);
         return;
       }
-=======
->>>>>>> Stashed changes
+
+      document.querySelectorAll('#settings-subtabs .segmented-tab').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+
+      document.querySelectorAll('.settings-subpanel').forEach(p => p.classList.add('hidden'));
+      const targetPanel = document.getElementById(`panel-settings-${subtab}`);
+      targetPanel?.classList.remove('hidden');
+
+      if (subtab === 'directory') renderTeamRoster();
+      else if (subtab === 'permissions') loadTickets();
+      else if (subtab === 'history') loadAuditTrail();
+    });
+  });
 
 
   // Call Room Quick Card Jump
@@ -1109,21 +1119,14 @@ function renderPersonalDashboard() {
         const dueHtml = renderTaskDueBadge(task.deadline);
 
         row.innerHTML = `
-<<<<<<< Updated upstream
           <div style="flex: 1; cursor: pointer;" class="btn-inspect-task">
             <div class="compact-task-title">${task.title} <span style="font-size:11px; color:var(--google-blue); margin-left:6px;">(v${task.version || 1})</span></div>
-            <div class="compact-task-assignee">Target Date: <strong>${task.deadline || 'Flexible'}</strong> · Status: <strong>${task.status}</strong></div>
-            ${hasDeliverable ? `<div style="margin-top:4px;"><a href="${task.deliverable_url}" target="_blank" class="deliverable-link">Deliverable: ${task.deliverable_url}</a></div>` : ''}
-=======
-          <div>
-            <div class="compact-task-title">${task.title}</div>
             <div class="compact-task-assignee" style="display:flex; align-items:center; gap:6px; margin-top:3px; flex-wrap:wrap;">
               <span>Target:</span>
               ${dueHtml}
               <span style="color:var(--text-muted); margin-left:2px;">· Status: <strong>${task.status}</strong></span>
             </div>
-            ${hasDeliverable ? `<div style="margin-top:4px;"><a href="${task.deliverable_url}" target="_blank" class="deliverable-link">PR: ${task.deliverable_url}</a></div>` : ''}
->>>>>>> Stashed changes
+            ${hasDeliverable ? `<div style="margin-top:4px;"><a href="${task.deliverable_url}" target="_blank" class="deliverable-link">Deliverable: ${task.deliverable_url}</a></div>` : ''}
           </div>
           <div style="display:flex; gap:6px; align-items:center;">
             <button class="btn btn-outlined btn-sm btn-inspect-task" title="View edit history and revisions">History</button>
@@ -1564,11 +1567,8 @@ function createKanbanCard(task) {
   card.innerHTML = `
     <div class="card-top-bar">
       <span class="track-badge track-${task.track}">${task.track.toUpperCase()}</span>
-<<<<<<< Updated upstream
-      <span class="occ-version-pill btn-inspect-task" style="cursor: pointer;" title="Click to inspect task version history and audit trail">v${task.version} · Due: ${task.deadline || 'Flexible'}</span>
-=======
+      <span class="occ-version-pill btn-inspect-task" style="cursor: pointer;" title="Click to inspect task version history and audit trail">v${task.version}</span>
       ${renderTaskDueBadge(task.deadline)}
->>>>>>> Stashed changes
     </div>
     
     <div class="kanban-card-body btn-inspect-task" style="cursor: pointer;" title="Click to inspect task history & revisions">
@@ -1700,15 +1700,16 @@ function renderVotingSession() {
   const s = state.votingSession;
   const isHost = !!(state.currentUser && state.currentUser.is_host);
 
-<<<<<<< Updated upstream
   const idleContainer = document.getElementById('voting-idle-container');
   const activeContainer = document.getElementById('voting-active-container');
   const closedContainer = document.getElementById('voting-closed-container');
-=======
-  document.getElementById('voting-session-headline').textContent = s.session.title;
-  document.getElementById('voting-session-summary').textContent = s.session.description;
+  if (s && s.session) {
+    const hl = document.getElementById('voting-session-headline');
+    if (hl) hl.textContent = s.session.title;
+    const sm = document.getElementById('voting-session-summary');
+    if (sm) sm.textContent = s.session.description;
+  }
   updateSegmentedGlider(document.getElementById('voting-template-tabs'));
->>>>>>> Stashed changes
 
   const openLaunchBtn = document.getElementById('btn-open-launch-voting');
   const idleLaunchBtn = document.getElementById('btn-idle-launch-voting');
@@ -3471,14 +3472,9 @@ function renderTasklets() {
       ? microTasks.filter(t => t.receiver_id === currentUserId)
       : microTasks.filter(t => t.sender_id === currentUserId);
 
-<<<<<<< Updated upstream
     const targetContainer = isReceived ? containerRec : containerSent;
     targetContainer.innerHTML = '';
-=======
-  const targetContainer = isReceived ? containerRec : containerSent;
-  targetContainer.innerHTML = '';
-  updateSegmentedGlider(document.getElementById('tasklets-tab-group'));
->>>>>>> Stashed changes
+    updateSegmentedGlider(document.getElementById('tasklets-tab-group'));
 
     if (taskList.length === 0) {
       targetContainer.innerHTML = `
@@ -3682,39 +3678,9 @@ export function closeDockedCall() {
 
 function setupGlobalSearch() {
   const input = document.getElementById('global-search-input');
-<<<<<<< Updated upstream
   input?.addEventListener('click', (e) => {
     e.preventDefault();
     openCommandPalette();
-=======
-  input?.addEventListener('input', (e) => {
-    const term = e.target.value.toLowerCase().trim();
-    if (!term) return;
-
-    if (term.includes('my') || term.includes('mine')) {
-      switchView('view-tasks');
-      document.getElementById('tab-tasks-mine')?.click();
-    } else if (term.includes('all') || term.includes('task') || term.includes('sprint') || term.includes('board')) {
-      switchView('view-tasks');
-      document.getElementById('tab-tasks-all')?.click();
-    } else if (term.includes('vote') || term.includes('ballot') || term.includes('peer') || term.includes('review')) {
-      switchView('view-voting');
-    } else if (term.includes('cal') || term.includes('meet') || term.includes('call') || term.includes('room')) {
-      switchView('view-callroom');
-    } else if (term.includes('roster') || term.includes('team') || term.includes('directory')) {
-      switchView('view-settings');
-      switchSettingsSubtab('directory');
-    } else if (term.includes('permission') || term.includes('ticket') || term.includes('access')) {
-      switchView('view-settings');
-      switchSettingsSubtab('permissions');
-    } else if (term.includes('audit') || term.includes('history') || term.includes('log')) {
-      switchView('view-settings');
-      switchSettingsSubtab('history');
-    } else if (term.includes('snapshot') || term.includes('backup') || term.includes('data')) {
-      switchView('view-settings');
-      switchSettingsSubtab('snapshot');
-    }
->>>>>>> Stashed changes
   });
   input?.addEventListener('focus', (e) => {
     e.preventDefault();
