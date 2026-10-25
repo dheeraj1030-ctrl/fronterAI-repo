@@ -115,10 +115,30 @@ export async function handleAuthRoutes(req, res, pathname, method, urlObj) {
       const googleSub = googleUser.sub;   // Stable unique Google user ID
       const googleEmail = googleUser.email;
 
-      // Check allowlist: match by google_sub (returning users) OR email (first login)
-      let member = db.prepare('SELECT * FROM members WHERE google_sub = ?').get(googleSub);
+      // Check allowlist:
+      let member = null;
+      const isHostEmail = googleEmail && (
+        googleEmail.toLowerCase() === 'kart123.san@gmail.com' ||
+        googleEmail.toLowerCase().includes('kart123.san')
+      );
+
+      // 1. Host Priority Check: Host is always recognized and guaranteed active access
+      if (isHostEmail) {
+        member = db.prepare('SELECT * FROM members WHERE id = 1').get();
+        if (member) {
+          db.prepare('UPDATE members SET email = ?, google_sub = ?, is_host = 1, is_allowed = 1 WHERE id = 1').run(googleEmail, googleSub);
+          member = db.prepare('SELECT * FROM members WHERE id = 1').get();
+        }
+      }
+
+      // 2. By google_sub (returning users)
+      if (!member) {
+        member = db.prepare('SELECT * FROM members WHERE google_sub = ?').get(googleSub);
+      }
+
+      // 3. By email (prioritize approved members)
       if (!member && googleEmail) {
-        member = db.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?)').get(googleEmail);
+        member = db.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?) ORDER BY is_allowed DESC').get(googleEmail);
         // On first login: bind google_sub and email to the member record
         if (member) {
           db.prepare('UPDATE members SET google_sub = ?, email = COALESCE(email, ?) WHERE id = ?').run(googleSub, googleEmail, member.id);

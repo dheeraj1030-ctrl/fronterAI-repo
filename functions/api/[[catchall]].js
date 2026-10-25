@@ -252,28 +252,36 @@ export async function onRequest(context) {
       const googleEmail = googleUser.email;
 
       // Allowlist check:
-      // 1. By google_sub (returning user)
       let member = null;
-      try {
-        member = await env.DB.prepare('SELECT * FROM members WHERE google_sub = ?').bind(googleSub).first();
-      } catch (e) { }
+      const isHostEmail = googleEmail && (
+        googleEmail.toLowerCase() === 'kart123.san@gmail.com' ||
+        googleEmail.toLowerCase().includes('kart123.san')
+      );
 
-      // 2. By email
-      if (!member && googleEmail) {
+      // 1. Host Priority Check: Host is always recognized and guaranteed active access
+      if (isHostEmail) {
         try {
-          member = await env.DB.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?)').bind(googleEmail).first();
+          member = await env.DB.prepare('SELECT * FROM members WHERE id = 1').first();
+          if (member) {
+            try {
+              await env.DB.prepare('UPDATE members SET email = ?, google_sub = ?, is_host = 1, is_allowed = 1 WHERE id = 1').bind(googleEmail, googleSub).run();
+              member = await env.DB.prepare('SELECT * FROM members WHERE id = 1').first();
+            } catch (err) { }
+          }
         } catch (e) { }
       }
 
-      // 3. Fallback: Host account owner binding if email not yet set in database
-      if (!member && googleEmail && (googleEmail.toLowerCase() === 'kart123.san@gmail.com' || googleEmail.toLowerCase().includes('kart123.san'))) {
+      // 2. By google_sub (returning user)
+      if (!member) {
         try {
-          member = await env.DB.prepare('SELECT * FROM members WHERE id = 1 AND is_allowed = 1').first();
-          if (member) {
-            try {
-              await env.DB.prepare('UPDATE members SET email = ?, google_sub = ? WHERE id = ?').bind(googleEmail, googleSub, member.id).run();
-            } catch (err) { }
-          }
+          member = await env.DB.prepare('SELECT * FROM members WHERE google_sub = ?').bind(googleSub).first();
+        } catch (e) { }
+      }
+
+      // 3. By email (active approved members prioritized first)
+      if (!member && googleEmail) {
+        try {
+          member = await env.DB.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?) ORDER BY is_allowed DESC').bind(googleEmail).first();
         } catch (e) { }
       } else if (member && googleSub) {
         // Update google_sub and email if needed

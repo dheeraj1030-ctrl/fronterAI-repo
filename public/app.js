@@ -132,6 +132,18 @@ async function init() {
       authAlertText.innerHTML = `<strong>403 Access Denied:</strong><br>
       Account <strong>${escapeHtml(userEmail)}</strong> does not have active access permissions on Frontier AI.`;
     }
+  } else if (params.get('error') === 'token_exchange_failed') {
+    authAlert?.classList.remove('hidden');
+    if (authAlertText) {
+      authAlertText.innerHTML = `<strong>Google Authentication Failed:</strong><br>
+      Unable to exchange authentication token with Google. Please verify that <code>GOOGLE_CLIENT_SECRET</code> is configured and matches your OAuth client credentials.`;
+    }
+  } else if (params.get('error')) {
+    authAlert?.classList.remove('hidden');
+    if (authAlertText) {
+      authAlertText.innerHTML = `<strong>Authentication Error:</strong><br>
+      ${escapeHtml(params.get('error'))}. Please try again.`;
+    }
   } else if (params.get('auth') === 'oauth_success') {
     showToast('Authenticated via Google OAuth 2.0!');
   }
