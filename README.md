@@ -50,6 +50,9 @@ Comprehensive technical and architectural documentation is available in the [`do
 
 ## Quickstart & Local Development
 
+> [!TIP]
+> **Contributing to Frontier AI?** Read our dedicated [**Developer Onboarding & Git Workflow Guide**](DEVELOPER_README.md) for branch rules (`develop` vs `main`), zero-cloud local testing, and pull request procedures.
+
 The local server runs on standard Node.js (v20+) with **zero external dependencies**.
 
 ```bash
