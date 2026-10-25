@@ -3942,6 +3942,7 @@ button:active:not(:disabled),
    COMMAND PALETTE (CTRL+K) — SPOTLIGHT & RAYCAST GLASS DESIGN
    ============================================================================== */
 .command-palette-dialog {
+  display: none;
   position: fixed !important;
   top: 14vh !important;
   left: 50% !important;
@@ -3959,6 +3960,11 @@ button:active:not(:disabled),
   overflow: hidden !important;
   z-index: 99999 !important;
   animation: palette-slide-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
+}
+
+.command-palette-dialog[open] {
+  display: flex !important;
+  flex-direction: column !important;
 }
 
 @keyframes palette-slide-in {

@@ -6,9 +6,12 @@
 // Universal fetch interceptor for dual-persistent sessions (Bearer token + Cookie)
 const originalFetch = window.fetch;
 window.fetch = function (resource, options = {}) {
+  options = options || {};
+  if (!options.credentials) {
+    options.credentials = 'include';
+  }
   const token = localStorage.getItem('frontier_session');
   if (token) {
-    options = options || {};
     if (!options.headers) {
       options.headers = { 'Authorization': `Bearer ${token}` };
     } else if (options.headers instanceof Headers) {
@@ -915,7 +918,8 @@ async function loadCurrentAuth() {
         localStorage.removeItem('frontier_session');
       }
       updateHeaderUserChip();
-    } else {
+    } else if (res.status === 401) {
+      state.currentUser = null;
       localStorage.removeItem('frontier_session');
     }
   } catch (err) {
@@ -3707,25 +3711,37 @@ function setupCommandPalette() {
 
   if (!modal || !input || !resultsContainer) return;
 
+  let isPaletteOpen = false;
   let selectedIndex = 0;
   let currentItems = [];
 
   openCommandPalette = (initialQuery = '') => {
     input.value = initialQuery;
+    selectedIndex = 0;
     try {
-      if (!modal.open) modal.showModal();
+      if (!modal.open) {
+        modal.showModal();
+      }
     } catch (err) {
       modal.setAttribute('open', '');
     }
+    isPaletteOpen = true;
     renderResults(initialQuery);
-    setTimeout(() => input.focus(), 50);
+    requestAnimationFrame(() => {
+      input.focus();
+      input.select();
+    });
   };
 
   const closePalette = () => {
+    isPaletteOpen = false;
     try {
-      if (modal.open) modal.close();
+      if (modal.open) {
+        modal.close();
+      }
     } catch (err) {}
     modal.removeAttribute('open');
+    input.blur();
   };
 
   if (escBtn) {
@@ -3742,13 +3758,13 @@ function setupCommandPalette() {
   window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
-      if (modal.open || modal.hasAttribute('open')) {
+      if (modal.open || modal.hasAttribute('open') || isPaletteOpen) {
         closePalette();
       } else {
         openCommandPalette();
       }
     } else if (e.key === 'Escape') {
-      if (modal.open || modal.hasAttribute('open')) {
+      if (modal.open || modal.hasAttribute('open') || isPaletteOpen) {
         e.preventDefault();
         e.stopPropagation();
         closePalette();
@@ -3761,9 +3777,20 @@ function setupCommandPalette() {
     closePalette();
   });
 
-  // Clicking backdrop closes palette
+  // Clicking backdrop closes palette (check bounding rect of the modal dialog box)
   modal.addEventListener('click', (e) => {
-    if (e.target === modal) closePalette();
+    if (e.target === modal) {
+      const rect = modal.getBoundingClientRect();
+      const isInDialog = (
+        rect.top <= e.clientY &&
+        e.clientY <= rect.top + rect.height &&
+        rect.left <= e.clientX &&
+        e.clientX <= rect.left + rect.width
+      );
+      if (!isInDialog) {
+        closePalette();
+      }
+    }
   });
 
   const baseCommands = [

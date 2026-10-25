@@ -123,6 +123,8 @@ async function getAuthMember(request, env) {
     const session = await env.DB.prepare(
       "SELECT member_id FROM sessions WHERE token = ? AND (expires_at > datetime('now') OR expires_at > ?)"
     ).bind(token, nowIso).first();
+    if (!session || !session.member_id) return null;
+
     let member = await env.DB.prepare(
       'SELECT * FROM members WHERE id = ? AND is_allowed = 1'
     ).bind(session.member_id).first();
