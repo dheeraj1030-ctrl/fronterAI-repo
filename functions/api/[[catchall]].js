@@ -81,6 +81,15 @@ async function ensureSchema(env) {
   try {
     await env.DB.prepare('ALTER TABLE tasklets ADD COLUMN is_anonymous INTEGER DEFAULT 0').run();
   } catch (e) { }
+
+  // Guarantee Host (id = 1) always exists with full permissions
+  try {
+    await env.DB.prepare(`
+      INSERT OR IGNORE INTO members (id, github_numeric_id, handle, name, role, team_track, email, is_host, is_allowed)
+      VALUES (1, 194890859, 'potatobun321', 'Kartikay', 'Team Host & Lead', 'lead', 'kart123.san@gmail.com', 1, 1)
+    `).run();
+    await env.DB.prepare('UPDATE members SET is_host = 1, is_allowed = 1 WHERE id = 1').run();
+  } catch (e) { }
 }
 
 async function createSignedState(secret) {
@@ -114,10 +123,20 @@ async function getAuthMember(request, env) {
     const session = await env.DB.prepare(
       "SELECT member_id FROM sessions WHERE token = ? AND (expires_at > datetime('now') OR expires_at > ?)"
     ).bind(token, nowIso).first();
-    if (!session) return null;
-    return await env.DB.prepare(
+    let member = await env.DB.prepare(
       'SELECT * FROM members WHERE id = ? AND is_allowed = 1'
-    ).bind(session.member_id).first() || null;
+    ).bind(session.member_id).first();
+    if (!member && session.member_id === 1) {
+      try {
+        await env.DB.prepare(`
+          INSERT OR IGNORE INTO members (id, github_numeric_id, handle, name, role, team_track, email, is_host, is_allowed)
+          VALUES (1, 194890859, 'potatobun321', 'Kartikay', 'Team Host & Lead', 'lead', 'kart123.san@gmail.com', 1, 1)
+        `).run();
+        await env.DB.prepare('UPDATE members SET is_host = 1, is_allowed = 1 WHERE id = 1').run();
+        member = await env.DB.prepare('SELECT * FROM members WHERE id = 1 AND is_allowed = 1').first();
+      } catch (e) { }
+    }
+    return member || null;
   } catch (err) {
     console.error('Session auth error:', err);
     return null;
@@ -478,7 +497,13 @@ export async function onRequest(context) {
     if (pathname.match(/^\/api\/members\/\d+\/reject$/) && method === 'POST') {
       const member = await getAuthMember(request, env);
       if (!member || !member.is_host) return jsonResponse({ error: 'Only Team Lead can reject members' }, 403);
-      const targetId = pathname.split('/')[3];
+      const targetId = parseInt(pathname.split('/')[3], 10);
+      if (targetId === 1 || targetId === member.id) {
+        return jsonResponse({ error: 'Host account cannot be removed or declined.' }, 400);
+      }
+      try {
+        await env.DB.prepare('DELETE FROM sessions WHERE member_id = ?').bind(targetId).run();
+      } catch (e) { }
       await env.DB.prepare('DELETE FROM members WHERE id = ?').bind(targetId).run();
       await logAudit(env, member.handle, 'MEMBER_REJECTED', 'members', `Rejected access request for member #${targetId}`);
       return jsonResponse({ success: true, message: 'Access request rejected' });
