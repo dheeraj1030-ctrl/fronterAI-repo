@@ -52,35 +52,35 @@ async function ensureSchema(env) {
         expires_at TEXT NOT NULL
       )
     `).run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare('ALTER TABLE members ADD COLUMN google_sub TEXT').run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare('ALTER TABLE members ADD COLUMN email TEXT').run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare('ALTER TABLE ballots ADD COLUMN rating INTEGER DEFAULT 5').run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare('ALTER TABLE ballots ADD COLUMN candidate_member_id INTEGER').run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare("ALTER TABLE tasklets ADD COLUMN type TEXT DEFAULT 'TASKLET'").run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare("ALTER TABLE tasklets ADD COLUMN category TEXT DEFAULT 'GENERAL'").run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare('ALTER TABLE tasklets ADD COLUMN is_anonymous INTEGER DEFAULT 0').run();
-  } catch (e) {}
+  } catch (e) { }
 }
 
 async function createSignedState(secret) {
@@ -256,13 +256,13 @@ export async function onRequest(context) {
       let member = null;
       try {
         member = await env.DB.prepare('SELECT * FROM members WHERE google_sub = ?').bind(googleSub).first();
-      } catch (e) {}
+      } catch (e) { }
 
       // 2. By email
       if (!member && googleEmail) {
         try {
           member = await env.DB.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?)').bind(googleEmail).first();
-        } catch (e) {}
+        } catch (e) { }
       }
 
       // 3. Fallback: Host account owner binding if email not yet set in database
@@ -272,14 +272,14 @@ export async function onRequest(context) {
           if (member) {
             try {
               await env.DB.prepare('UPDATE members SET email = ?, google_sub = ? WHERE id = ?').bind(googleEmail, googleSub, member.id).run();
-            } catch (err) {}
+            } catch (err) { }
           }
-        } catch (e) {}
+        } catch (e) { }
       } else if (member && googleSub) {
         // Update google_sub and email if needed
         try {
           await env.DB.prepare('UPDATE members SET google_sub = COALESCE(google_sub, ?), email = COALESCE(email, ?) WHERE id = ?').bind(googleSub, googleEmail || null, member.id).run();
-        } catch (e) {}
+        } catch (e) { }
       }
 
       // 4. If completely new user, record as Pending Access Request
@@ -298,7 +298,7 @@ export async function onRequest(context) {
               INSERT INTO members (handle, name, role, team_track, email, google_sub, is_host, is_allowed)
               VALUES (?, ?, 'Pending Review', 'unassigned', ?, ?, 0, 0)
             `).bind(cleanHandle, displayName, googleEmail, googleSub).run();
-          } catch (e2) {}
+          } catch (e2) { }
         }
 
         await logAudit(env, `google_${googleEmail}`, 'ACCESS_REQUEST_SUBMITTED', 'auth',
@@ -383,7 +383,7 @@ export async function onRequest(context) {
           try {
             const list = JSON.parse(ev.target_audience);
             if (Array.isArray(list) && list.map(Number).includes(member.id)) return true;
-          } catch {}
+          } catch { }
         }
         return false;
       }).map(ev => {
@@ -924,7 +924,7 @@ export async function onRequest(context) {
       query += ' ORDER BY t.id DESC';
 
       const res = await env.DB.prepare(query).bind(...params).all();
-      
+
       // Mask sender for anonymous feedback where recipient is reviewing
       const items = (res.results || []).map(item => {
         if (item.is_anonymous && item.receiver_id === memberId && item.sender_id !== memberId) {
@@ -1084,7 +1084,7 @@ export async function onRequest(context) {
         ).all();
         const activeMembers = membersRes.results || [];
         if (activeMembers.length > 0) {
-          teamRosterContext = '\nActive Team Roster:\n' + activeMembers.map(m => 
+          teamRosterContext = '\nActive Team Roster:\n' + activeMembers.map(m =>
             `- ${m.name} (@${m.handle || (m.email ? m.email.split('@')[0] : 'user')}): ${m.role} [Track: ${m.team_track || 'General'}]${m.is_host ? ' (Team Host & Lead)' : ''}`
           ).join('\n');
         }
@@ -1102,7 +1102,7 @@ export async function onRequest(context) {
             LEFT JOIN members m ON t.assignee_id = m.id
             ORDER BY t.id ASC LIMIT 15
           `).all();
-          tasksContext = '\nActive Sprint Tasks:\n' + (tasks.results || []).map(t => 
+          tasksContext = '\nActive Sprint Tasks:\n' + (tasks.results || []).map(t =>
             `- [${t.status}] ${t.title} (${t.track})${t.assignee_name ? ' [Assigned to: ' + t.assignee_name + ']' : ''}${t.deadline ? ' due ' + t.deadline : ''}`
           ).join('\n');
         } catch (e) {
@@ -1121,7 +1121,7 @@ export async function onRequest(context) {
       let memory = null;
       try {
         memory = await env.DB.prepare('SELECT memory_data FROM member_memories WHERE member_id = ?').bind(memberId).first();
-      } catch (e) {}
+      } catch (e) { }
 
       const systemPrompt = `You are Frontier Oracle, the AI project assistant for the Frontier AI engineering workspace.
 Current User: ${member.name} (@${member.handle || member.email}) — ${member.role}${memory?.memory_data ? '\nUser Profile: ' + memory.memory_data : ''}
