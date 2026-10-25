@@ -3,6 +3,31 @@
  * Personal vs. Global Dashboards, Host Authorization, Calendar & Peer Performance Voting
  */
 
+// Universal fetch interceptor for dual-persistent sessions (Bearer token + Cookie)
+const originalFetch = window.fetch;
+window.fetch = function (resource, options = {}) {
+  const token = localStorage.getItem('frontier_session');
+  if (token) {
+    options = options || {};
+    if (!options.headers) {
+      options.headers = { 'Authorization': `Bearer ${token}` };
+    } else if (options.headers instanceof Headers) {
+      if (!options.headers.has('Authorization')) {
+        options.headers.set('Authorization', `Bearer ${token}`);
+      }
+    } else if (Array.isArray(options.headers)) {
+      if (!options.headers.some(([k]) => k.toLowerCase() === 'authorization')) {
+        options.headers.push(['Authorization', `Bearer ${token}`]);
+      }
+    } else {
+      if (!options.headers['Authorization'] && !options.headers['authorization']) {
+        options.headers['Authorization'] = `Bearer ${token}`;
+      }
+    }
+  }
+  return originalFetch.call(this, resource, options);
+};
+
 const state = {
   currentUser: null,
   members: [],
@@ -262,6 +287,11 @@ async function init() {
 
   // Check URL query parameters for OAuth callbacks and alerts
   const params = new URLSearchParams(window.location.search);
+  const sid = params.get('sid');
+  if (sid) {
+    localStorage.setItem('frontier_session', sid);
+  }
+
   const authAlert = document.getElementById('auth-alert');
   const authAlertText = document.getElementById('auth-alert-text');
 
@@ -271,23 +301,47 @@ async function init() {
       authAlertText.innerHTML = `<strong>Google OAuth Not Configured:</strong><br>
       Please configure <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> in Cloudflare Worker settings.`;
     }
+  } else if (params.get('error') === 'csrf_state_mismatch') {
+    authAlert?.classList.remove('hidden');
+    if (authAlertText) {
+      authAlertText.innerHTML = `<strong>Sign-in Session Expired:</strong><br>
+      The browser session timed out or was interrupted. Please click <strong>"Sign in with Google"</strong> again to continue.`;
+    }
+  } else if (params.get('auth') === 'pending_approval') {
+    const userEmail = params.get('email') || 'your account';
+    authAlert?.classList.remove('hidden');
+    if (authAlertText) {
+      authAlertText.innerHTML = `
+        <div style="text-align: left; line-height: 1.45;">
+          <strong style="color: #f59e0b; display: flex; align-items: center; gap: 6px; font-size: 13.5px;">
+            <span>⏳</span> Access Request Received
+          </strong>
+          <div style="margin-top: 4px; font-size: 12.5px;">
+            Google account <strong>${escapeHtml(userEmail)}</strong> has been registered and is waiting for <strong>Host Approval</strong>.
+          </div>
+          <div style="margin-top: 6px; font-size: 12px; color: var(--text-muted);">
+            The Team Lead has been notified to review and activate your access. Once approved, simply click <strong>"Sign in with Google"</strong> to enter.
+          </div>
+        </div>
+      `;
+    }
   } else if (params.get('error') === 'unauthorized_allowlist') {
     const userEmail = params.get('email') || 'Unknown';
     authAlert?.classList.remove('hidden');
     if (authAlertText) {
-      authAlertText.innerHTML = `<strong>403 Access Denied (Strict Allowlist Policy):</strong><br>
-      Google account <strong>${userEmail}</strong> was <strong>REJECTED</strong>. Only authorized Frontier AI team members on the allowlist can enter this platform.`;
+      authAlertText.innerHTML = `<strong>403 Access Denied:</strong><br>
+      Account <strong>${escapeHtml(userEmail)}</strong> does not have active access permissions on Frontier AI.`;
     }
   } else if (params.get('auth') === 'oauth_success') {
     showToast('Authenticated via Google OAuth 2.0!');
   }
 
-  if (params.has('error') || params.has('auth')) {
+  if (params.has('error') || params.has('auth') || params.has('sid')) {
     window.history.replaceState({}, document.title, window.location.pathname);
   }
 
-  await loadMembers();
   await loadCurrentAuth();
+  await loadMembers();
 
   if (state.currentUser) {
     showWorkspace();
@@ -662,6 +716,13 @@ function switchView(viewId) {
 // ACTUAL LOGIN UI & ROLE SEGMENTATION LOGIC
 // -------------------------------------------------------------
 function setupAuthScreen() {
+  // Visual feedback on Google OAuth sign-in click without blocking navigation
+  const btnGoogle = document.getElementById('btn-google-oauth');
+  btnGoogle?.addEventListener('click', () => {
+    btnGoogle.style.opacity = '0.7';
+    btnGoogle.style.cursor = 'wait';
+  });
+
   // Login Form Submission
   const formLogin = document.getElementById('form-login');
   formLogin?.addEventListener('submit', async (e) => {
@@ -683,13 +744,12 @@ function setupAuthScreen() {
   document.getElementById('btn-header-signout')?.addEventListener('click', async () => {
     try {
       await fetch('/api/auth/logout', { method: 'POST' });
-      state.currentUser = null;
-      document.getElementById('persona-dropdown-menu')?.classList.add('hidden');
-      showToast('You have been signed out.');
-      showAuthScreen();
-    } catch (err) {
-      showToast('Error signing out', true);
-    }
+    } catch (err) {}
+    localStorage.removeItem('frontier_session');
+    state.currentUser = null;
+    document.getElementById('persona-dropdown-menu')?.classList.add('hidden');
+    showToast('You have been signed out.');
+    showAuthScreen();
   });
 }
 
@@ -709,6 +769,9 @@ async function submitLogin(identifier) {
     }
 
     state.currentUser = data.user;
+    if (data.token) {
+      localStorage.setItem('frontier_session', data.token);
+    }
     updateHeaderUserChip();
     populatePersonaDropdown();
     showToast(`Signed in as ${state.currentUser.name} (${state.currentUser.is_host ? 'Team Lead' : 'Team Member'}).`);
@@ -824,7 +887,14 @@ async function loadCurrentAuth() {
     if (res.ok) {
       const data = await res.json();
       state.currentUser = data.user || data.member || null;
+      if (data.token) {
+        localStorage.setItem('frontier_session', data.token);
+      } else if (!state.currentUser) {
+        localStorage.removeItem('frontier_session');
+      }
       updateHeaderUserChip();
+    } else {
+      localStorage.removeItem('frontier_session');
     }
   } catch (err) {
     console.error('Failed to load current auth:', err);
@@ -835,7 +905,25 @@ async function loadMembers() {
   try {
     const res = await fetch('/api/members');
     const data = await res.json();
-    state.members = data.members;
+    state.members = data.members || [];
+
+    // If current logged-in user is Host, fetch pending access requests
+    if (state.currentUser && state.currentUser.is_host === 1) {
+      try {
+        const pRes = await fetch('/api/members/pending');
+        if (pRes.ok) {
+          const pData = await pRes.json();
+          state.pendingMembers = pData.pending || [];
+        } else {
+          state.pendingMembers = (state.members || []).filter(m => m.is_allowed === 0);
+        }
+      } catch (pe) {
+        state.pendingMembers = (state.members || []).filter(m => m.is_allowed === 0);
+      }
+    } else {
+      state.pendingMembers = [];
+    }
+
     populatePersonaDropdown();
     populateSelects();
     renderTeamRoster();
@@ -2554,18 +2642,113 @@ function renderTeamRoster() {
   const containerSettings = document.getElementById('team-roster-cards');
   const containerPeers = document.getElementById('team-roster-peers-cards');
 
+  const activeMembers = (state.members || []).filter(m => m.is_allowed !== 0);
+
   const subtitle = document.getElementById('team-roster-subtitle');
   if (subtitle) {
-    const memberCount = state.members ? state.members.length : 0;
-    subtitle.textContent = `${memberCount} Allowlisted Member${memberCount === 1 ? '' : 's'}: 1 Designated Host + ${Math.max(0, memberCount - 1)} Team Participant${memberCount === 2 ? '' : 's'}`;
+    const memberCount = activeMembers.length;
+    subtitle.textContent = `${memberCount} Active Member${memberCount === 1 ? '' : 's'}: 1 Designated Host + ${Math.max(0, memberCount - 1)} Team Participant${memberCount === 2 ? '' : 's'}`;
   }
 
   const teamBadge = document.querySelector('[data-view="view-team"] .nav-badge');
-  if (teamBadge && state.members) {
-    teamBadge.textContent = state.members.length;
+  if (teamBadge) {
+    teamBadge.textContent = activeMembers.length;
   }
 
   const isHost = state.currentUser && state.currentUser.is_host === 1;
+
+  // Pending Access Requests (Host Only)
+  const pendingSection = document.getElementById('pending-requests-section');
+  const pendingList = document.getElementById('pending-requests-list');
+  const pendingCount = document.getElementById('pending-requests-count');
+
+  if (pendingSection && pendingList) {
+    if (isHost && state.pendingMembers && state.pendingMembers.length > 0) {
+      pendingSection.classList.remove('hidden');
+      if (pendingCount) pendingCount.textContent = state.pendingMembers.length;
+      pendingList.innerHTML = '';
+
+      state.pendingMembers.forEach(pm => {
+        const item = document.createElement('div');
+        item.className = 'pending-member-row';
+        item.innerHTML = `
+          <div class="pending-member-info">
+            <div class="roster-avatar avatar-amber" style="width: 38px; height: 38px; font-size: 13px;">${getInitials(pm.name)}</div>
+            <div>
+              <div class="pending-member-name">
+                ${escapeHtml(pm.name)}
+                <span class="tag-pending-review">Pending Review</span>
+              </div>
+              <div class="pending-member-email">${escapeHtml(pm.email || `@${pm.handle}`)}</div>
+            </div>
+          </div>
+          <div class="pending-member-controls">
+            <div class="control-group">
+              <span class="control-label">Role:</span>
+              <input type="text" class="input-material pending-role-val" value="${pm.role === 'Pending Review' ? 'Software Engineer' : escapeHtml(pm.role)}">
+            </div>
+            <div class="control-group">
+              <span class="control-label">Track:</span>
+              <select class="select-material pending-track-val">
+                <option value="backend" ${pm.team_track === 'backend' ? 'selected' : ''}>Backend</option>
+                <option value="frontend" ${pm.team_track === 'frontend' ? 'selected' : ''}>Frontend</option>
+                <option value="lead" ${pm.team_track === 'lead' ? 'selected' : ''}>Lead</option>
+              </select>
+            </div>
+            <div class="pending-action-btns">
+              <button class="btn btn-m3-approve btn-approve-request" data-id="${pm.id}">
+                Approve
+              </button>
+              <button class="btn btn-m3-decline btn-reject-request" data-id="${pm.id}">
+                Decline
+              </button>
+            </div>
+          </div>
+        `;
+
+        item.querySelector('.btn-approve-request')?.addEventListener('click', async () => {
+          const roleInput = item.querySelector('.pending-role-val')?.value;
+          const trackSelect = item.querySelector('.pending-track-val')?.value;
+          try {
+            const res = await fetch(`/api/members/${pm.id}/approve`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ role: roleInput, team_track: trackSelect })
+            });
+            const data = await res.json();
+            if (res.ok) {
+              showToast(`Access granted to ${pm.name}!`);
+              await loadMembers();
+            } else {
+              showToast(data.error || 'Failed to approve member', true);
+            }
+          } catch (e) {
+            showToast('Network error approving member', true);
+          }
+        });
+
+        item.querySelector('.btn-reject-request')?.addEventListener('click', async () => {
+          if (!confirm(`Reject access request for ${pm.name} (${pm.email || pm.handle})?`)) return;
+          try {
+            const res = await fetch(`/api/members/${pm.id}/reject`, { method: 'POST' });
+            const data = await res.json();
+            if (res.ok) {
+              showToast(`Access request for ${pm.name} was rejected.`);
+              await loadMembers();
+            } else {
+              showToast(data.error || 'Failed to reject request', true);
+            }
+          } catch (e) {
+            showToast('Network error rejecting request', true);
+          }
+        });
+
+        pendingList.appendChild(item);
+      });
+    } else {
+      pendingSection.classList.add('hidden');
+    }
+  }
 
   const renderCard = (m, isPeersView = false) => {
     const card = document.createElement('div');
@@ -2649,12 +2832,12 @@ function renderTeamRoster() {
 
   if (containerSettings) {
     containerSettings.innerHTML = '';
-    state.members.forEach(m => containerSettings.appendChild(renderCard(m, false)));
+    activeMembers.forEach(m => containerSettings.appendChild(renderCard(m, false)));
   }
 
   if (containerPeers) {
     containerPeers.innerHTML = '';
-    state.members.forEach(m => containerPeers.appendChild(renderCard(m, true)));
+    activeMembers.forEach(m => containerPeers.appendChild(renderCard(m, true)));
   }
 }
 
@@ -2746,10 +2929,11 @@ function populateSelects() {
   const taskAssignee = document.getElementById('task-assignee');
   const calAssignee = document.getElementById('cal-assignee');
   const customMembersBox = document.getElementById('cal-member-checkboxes');
+  const activeMembers = (state.members || []).filter(m => m.is_allowed !== 0);
 
   if (taskAssignee) {
     taskAssignee.innerHTML = '';
-    state.members.forEach(m => {
+    activeMembers.forEach(m => {
       const opt = document.createElement('option');
       opt.value = m.id;
       opt.textContent = `${m.name} (${m.role})`;
@@ -2759,7 +2943,7 @@ function populateSelects() {
 
   if (calAssignee) {
     calAssignee.innerHTML = '<option value="">All Team Members (Global Ping)</option>';
-    state.members.forEach(m => {
+    activeMembers.forEach(m => {
       const opt = document.createElement('option');
       opt.value = m.id;
       opt.textContent = `${m.name} (${m.role})`;
@@ -2769,7 +2953,7 @@ function populateSelects() {
 
   if (customMembersBox) {
     customMembersBox.innerHTML = '';
-    state.members.forEach(m => {
+    activeMembers.forEach(m => {
       const label = document.createElement('label');
       label.style = 'display: flex; align-items: center; gap: 6px; font-size: 12px; cursor: pointer; color: var(--text-primary);';
       label.innerHTML = `

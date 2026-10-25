@@ -52,45 +52,68 @@ async function ensureSchema(env) {
         expires_at TEXT NOT NULL
       )
     `).run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare('ALTER TABLE members ADD COLUMN google_sub TEXT').run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare('ALTER TABLE members ADD COLUMN email TEXT').run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare('ALTER TABLE ballots ADD COLUMN rating INTEGER DEFAULT 5').run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare('ALTER TABLE ballots ADD COLUMN candidate_member_id INTEGER').run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare("ALTER TABLE tasklets ADD COLUMN type TEXT DEFAULT 'TASKLET'").run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare("ALTER TABLE tasklets ADD COLUMN category TEXT DEFAULT 'GENERAL'").run();
-  } catch (e) {}
+  } catch (e) { }
 
   try {
     await env.DB.prepare('ALTER TABLE tasklets ADD COLUMN is_anonymous INTEGER DEFAULT 0').run();
-  } catch (e) {}
+  } catch (e) { }
+}
+
+async function createSignedState(secret) {
+  const nonce = crypto.randomUUID().replace(/-/g, '');
+  const ts = Date.now().toString();
+  const sig = await hmacSha256(secret, `${nonce}.${ts}`);
+  return `${nonce}.${ts}.${sig}`;
+}
+
+async function verifySignedState(secret, stateToken) {
+  if (!stateToken || typeof stateToken !== 'string') return false;
+  const parts = stateToken.split('.');
+  if (parts.length !== 3) return false;
+  const [nonce, tsStr, sig] = parts;
+  const ts = parseInt(tsStr, 10);
+  if (isNaN(ts)) return false;
+  // 15-minute validity window
+  if (Date.now() - ts > 15 * 60 * 1000 || ts > Date.now() + 60 * 1000) return false;
+  const expectedSig = await hmacSha256(secret, `${nonce}.${tsStr}`);
+  return sig === expectedSig;
 }
 
 async function getAuthMember(request, env) {
+  const authHeader = request.headers.get('Authorization') || request.headers.get('authorization') || '';
+  const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
   const cookies = parseCookies(request);
-  const token = cookies.frontier_session;
+  const token = bearerToken || cookies.frontier_session;
   if (!token || !env.DB) return null;
   try {
+    const nowIso = new Date().toISOString();
     const session = await env.DB.prepare(
-      "SELECT member_id FROM sessions WHERE token = ? AND expires_at > datetime('now')"
-    ).bind(token).first();
+      "SELECT member_id FROM sessions WHERE token = ? AND (expires_at > datetime('now') OR expires_at > ?)"
+    ).bind(token, nowIso).first();
     if (!session) return null;
     return await env.DB.prepare(
       'SELECT * FROM members WHERE id = ? AND is_allowed = 1'
@@ -146,10 +169,14 @@ export async function onRequest(context) {
     // --------------------------------------------------------------------------
     if ((pathname === '/api/auth/current' || pathname === '/api/auth/session') && method === 'GET') {
       const member = await getAuthMember(request, env);
+      const authHeader = request.headers.get('Authorization') || request.headers.get('authorization') || '';
+      const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+      const token = bearerToken || cookies.frontier_session || null;
       return jsonResponse({
         authenticated: !!member,
         member: member || null,
         user: member || null,
+        token: member ? token : null,
         oauthConfigured: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET)
       });
     }
@@ -161,7 +188,8 @@ export async function onRequest(context) {
       const clientId = env.GOOGLE_CLIENT_ID || '33531224866-tci0079quk7mfgh7plhtgnpj6lfa96ou.apps.googleusercontent.com';
       if (!clientId) return jsonResponse({ error: 'GOOGLE_CLIENT_ID not configured on Cloudflare' }, 500);
 
-      const state = crypto.randomUUID();
+      const secret = env.JWT_SECRET || env.GOOGLE_CLIENT_SECRET || 'frontier-oauth-secret-key-salt-32ch';
+      const state = await createSignedState(secret);
       const redirectUri = `${url.origin}/api/auth/google/callback`;
       const googleUrl = `https://accounts.google.com/o/oauth2/v2/auth?` +
         `client_id=${clientId}` +
@@ -171,12 +199,13 @@ export async function onRequest(context) {
         `&access_type=offline` +
         `&state=${state}`;
 
+      const headers = new Headers();
+      headers.set('Location', googleUrl);
+      headers.append('Set-Cookie', `oauth_state=${state}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=900`);
+
       return new Response(null, {
         status: 302,
-        headers: {
-          'Location': googleUrl,
-          'Set-Cookie': `oauth_state=${state}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=600`
-        }
+        headers
       });
     }
 
@@ -186,8 +215,12 @@ export async function onRequest(context) {
       const oauthError = url.searchParams.get('error');
 
       if (oauthError) return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?error=${encodeURIComponent(oauthError)}` } });
-      if (!state || state !== cookies.oauth_state) {
-        await logAudit(env, 'anonymous', 'OAUTH_CSRF_FAILED', 'auth', 'Google OAuth state mismatch', 'DENIED');
+
+      const secret = env.JWT_SECRET || env.GOOGLE_CLIENT_SECRET || 'frontier-oauth-secret-key-salt-32ch';
+      const isStateValid = (await verifySignedState(secret, state)) || (cookies.oauth_state && state === cookies.oauth_state);
+
+      if (!state || !isStateValid) {
+        await logAudit(env, 'anonymous', 'OAUTH_CSRF_FAILED', 'auth', 'Google OAuth state mismatch or expired', 'DENIED');
         return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?error=csrf_state_mismatch` } });
       }
 
@@ -223,13 +256,13 @@ export async function onRequest(context) {
       let member = null;
       try {
         member = await env.DB.prepare('SELECT * FROM members WHERE google_sub = ?').bind(googleSub).first();
-      } catch (e) {}
+      } catch (e) { }
 
-      // 2. By email (first login)
+      // 2. By email
       if (!member && googleEmail) {
         try {
-          member = await env.DB.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?) AND is_allowed = 1').bind(googleEmail).first();
-        } catch (e) {}
+          member = await env.DB.prepare('SELECT * FROM members WHERE LOWER(email) = LOWER(?)').bind(googleEmail).first();
+        } catch (e) { }
       }
 
       // 3. Fallback: Host account owner binding if email not yet set in database
@@ -239,44 +272,78 @@ export async function onRequest(context) {
           if (member) {
             try {
               await env.DB.prepare('UPDATE members SET email = ?, google_sub = ? WHERE id = ?').bind(googleEmail, googleSub, member.id).run();
-            } catch (err) {}
+            } catch (err) { }
           }
-        } catch (e) {}
+        } catch (e) { }
       } else if (member && googleSub) {
         // Update google_sub and email if needed
         try {
           await env.DB.prepare('UPDATE members SET google_sub = COALESCE(google_sub, ?), email = COALESCE(email, ?) WHERE id = ?').bind(googleSub, googleEmail || null, member.id).run();
-        } catch (e) {}
+        } catch (e) { }
       }
 
-      if (!member || !member.is_allowed) {
-        await logAudit(env, `google_${googleEmail}`, 'OAUTH_ALLOWLIST_DENIED', 'auth',
-          `Google account ${googleEmail} not in Frontier AI allowlist.`, 'DENIED');
-        return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?error=unauthorized_allowlist&email=${encodeURIComponent(googleEmail || '')}` } });
+      // 4. If completely new user, record as Pending Access Request
+      if (!member) {
+        const cleanHandle = (googleEmail.split('@')[0] || 'user').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 30);
+        const displayName = googleUser.name || googleUser.given_name || cleanHandle;
+        const numericId = Math.floor(Date.now() / 1000) + Math.floor(Math.random() * 100000);
+        try {
+          await env.DB.prepare(`
+            INSERT INTO members (github_numeric_id, handle, name, role, team_track, email, google_sub, is_host, is_allowed)
+            VALUES (?, ?, ?, 'Pending Review', 'unassigned', ?, ?, 0, 0)
+          `).bind(numericId, cleanHandle, displayName, googleEmail, googleSub).run();
+        } catch (e) {
+          try {
+            await env.DB.prepare(`
+              INSERT INTO members (handle, name, role, team_track, email, google_sub, is_host, is_allowed)
+              VALUES (?, ?, 'Pending Review', 'unassigned', ?, ?, 0, 0)
+            `).bind(cleanHandle, displayName, googleEmail, googleSub).run();
+          } catch (e2) { }
+        }
+
+        await logAudit(env, `google_${googleEmail}`, 'ACCESS_REQUEST_SUBMITTED', 'auth',
+          `New user ${displayName} (${googleEmail}) requested access to workspace. Queued for Host approval.`, 'SUCCESS');
+
+        return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?auth=pending_approval&email=${encodeURIComponent(googleEmail || '')}` } });
       }
 
-      // Issue session
+      if (!member.is_allowed) {
+        await logAudit(env, member.handle, 'LOGIN_AWAITING_APPROVAL', 'auth',
+          `User ${member.name} (${googleEmail}) attempted login while access request is awaiting Host approval.`, 'PENDING');
+        return new Response(null, { status: 302, headers: { 'Location': `${url.origin}/?auth=pending_approval&email=${encodeURIComponent(googleEmail || '')}` } });
+      }
+
+      // Issue session (30-day persistence)
       const sessionToken = crypto.randomUUID() + '-' + crypto.randomUUID();
-      const expiresAt = new Date(Date.now() + 86400000 * 7).toISOString();
+      const expiresAt = new Date(Date.now() + 86400000 * 30).toISOString();
       await env.DB.prepare("INSERT INTO sessions (token, member_id, created_at, expires_at) VALUES (?, ?, datetime('now'), ?)").bind(sessionToken, member.id, expiresAt).run();
       await logAudit(env, member.handle, 'OAUTH_LOGIN_SUCCESS', 'auth',
         `Google OAuth login: ${member.name} (${googleEmail}). Role: ${member.is_host ? 'AUTHORATOR' : 'PARTICIPANT'}.`, 'SUCCESS');
 
+      const headers = new Headers();
+      headers.set('Location', `${url.origin}/?auth=oauth_success&sid=${sessionToken}`);
+      headers.append('Set-Cookie', `frontier_session=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`);
+      headers.append('Set-Cookie', `oauth_state=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`);
+
       return new Response(null, {
         status: 302,
-        headers: {
-          'Location': `${url.origin}/`,
-          'Set-Cookie': `frontier_session=${sessionToken}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=604800`
-        }
+        headers
       });
     }
 
     if (pathname === '/api/auth/logout' && method === 'POST') {
-      if (cookies.frontier_session) {
-        await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(cookies.frontier_session).run();
+      const authHeader = request.headers.get('Authorization') || request.headers.get('authorization') || '';
+      const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : null;
+      const token = bearerToken || cookies.frontier_session;
+      if (token) {
+        await env.DB.prepare('DELETE FROM sessions WHERE token = ?').bind(token).run();
       }
-      return jsonResponse({ success: true }, 200, {
-        'Set-Cookie': 'frontier_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0'
+      const headers = new Headers();
+      headers.set('Content-Type', 'application/json');
+      headers.append('Set-Cookie', 'frontier_session=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0');
+      return new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers
       });
     }
 
@@ -316,7 +383,7 @@ export async function onRequest(context) {
           try {
             const list = JSON.parse(ev.target_audience);
             if (Array.isArray(list) && list.map(Number).includes(member.id)) return true;
-          } catch {}
+          } catch { }
         }
         return false;
       }).map(ev => {
@@ -372,8 +439,41 @@ export async function onRequest(context) {
     // 4. MEMBERS ROSTER
     // --------------------------------------------------------------------------
     if (pathname === '/api/members' && method === 'GET') {
-      const res = await env.DB.prepare('SELECT id, handle, name, role, team_track, is_host, is_allowed, email FROM members WHERE is_allowed = 1').all();
+      const authUser = await getAuthMember(request, env);
+      let query = 'SELECT id, handle, name, role, team_track, is_host, is_allowed, email FROM members WHERE is_allowed = 1';
+      if (authUser && authUser.is_host) {
+        query = 'SELECT id, handle, name, role, team_track, is_host, is_allowed, email FROM members';
+      }
+      const res = await env.DB.prepare(query).all();
       return jsonResponse({ members: res.results || [] });
+    }
+
+    if (pathname === '/api/members/pending' && method === 'GET') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Only Team Lead can view pending access requests' }, 403);
+      const res = await env.DB.prepare('SELECT id, handle, name, role, team_track, is_host, is_allowed, email FROM members WHERE is_allowed = 0 ORDER BY id DESC').all();
+      return jsonResponse({ pending: res.results || [] });
+    }
+
+    if (pathname.match(/^\/api\/members\/\d+\/approve$/) && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Only Team Lead can approve members' }, 403);
+      const targetId = pathname.split('/')[3];
+      const body = await request.json().catch(() => ({}));
+      const role = (body && body.role && body.role.trim()) || 'Engineer';
+      const teamTrack = (body && body.team_track) || 'backend';
+      await env.DB.prepare('UPDATE members SET is_allowed = 1, role = ?, team_track = ? WHERE id = ?').bind(role, teamTrack, targetId).run();
+      await logAudit(env, member.handle, 'MEMBER_APPROVED', 'members', `Approved member #${targetId} as ${role} [${teamTrack}]`);
+      return jsonResponse({ success: true, message: 'Member approved successfully' });
+    }
+
+    if (pathname.match(/^\/api\/members\/\d+\/reject$/) && method === 'POST') {
+      const member = await getAuthMember(request, env);
+      if (!member || !member.is_host) return jsonResponse({ error: 'Only Team Lead can reject members' }, 403);
+      const targetId = pathname.split('/')[3];
+      await env.DB.prepare('DELETE FROM members WHERE id = ?').bind(targetId).run();
+      await logAudit(env, member.handle, 'MEMBER_REJECTED', 'members', `Rejected access request for member #${targetId}`);
+      return jsonResponse({ success: true, message: 'Access request rejected' });
     }
 
     if (pathname === '/api/members' && method === 'POST') {
@@ -824,7 +924,7 @@ export async function onRequest(context) {
       query += ' ORDER BY t.id DESC';
 
       const res = await env.DB.prepare(query).bind(...params).all();
-      
+
       // Mask sender for anonymous feedback where recipient is reviewing
       const items = (res.results || []).map(item => {
         if (item.is_anonymous && item.receiver_id === memberId && item.sender_id !== memberId) {
@@ -975,14 +1075,45 @@ export async function onRequest(context) {
 
       // Build Tier 1 dynamic context from D1
       const lower = message.toLowerCase();
-      let tasksContext = '';
-      if (/task|todo|progress|deliverable|deadline|work|sprint|status/.test(lower) || lower.length < 15) {
-        const tasks = await env.DB.prepare('SELECT title, track, status, deadline FROM tasks ORDER BY id ASC LIMIT 15').all();
-        tasksContext = '\nActive Sprint Tasks:\n' + (tasks.results || []).map(t => `- [${t.status}] ${t.title} (${t.track})${t.deadline ? ' due ' + t.deadline : ''}`).join('\n');
+
+      // 1. Live Team Roster from D1
+      let teamRosterContext = '';
+      try {
+        const membersRes = await env.DB.prepare(
+          'SELECT name, handle, role, team_track, email, is_host FROM members WHERE is_allowed = 1 ORDER BY is_host DESC, id ASC'
+        ).all();
+        const activeMembers = membersRes.results || [];
+        if (activeMembers.length > 0) {
+          teamRosterContext = '\nActive Team Roster:\n' + activeMembers.map(m =>
+            `- ${m.name} (@${m.handle || (m.email ? m.email.split('@')[0] : 'user')}): ${m.role} [Track: ${m.team_track || 'General'}]${m.is_host ? ' (Team Host & Lead)' : ''}`
+          ).join('\n');
+        }
+      } catch (err) {
+        console.error('Failed to load team roster for AI Oracle:', err);
       }
 
+      // 2. Active Sprint Tasks
+      let tasksContext = '';
+      if (/task|todo|progress|deliverable|deadline|work|sprint|status|who|assign/.test(lower) || lower.length < 20) {
+        try {
+          const tasks = await env.DB.prepare(`
+            SELECT t.title, t.track, t.status, t.deadline, m.name as assignee_name
+            FROM tasks t
+            LEFT JOIN members m ON t.assignee_id = m.id
+            ORDER BY t.id ASC LIMIT 15
+          `).all();
+          tasksContext = '\nActive Sprint Tasks:\n' + (tasks.results || []).map(t =>
+            `- [${t.status}] ${t.title} (${t.track})${t.assignee_name ? ' [Assigned to: ' + t.assignee_name + ']' : ''}${t.deadline ? ' due ' + t.deadline : ''}`
+          ).join('\n');
+        } catch (e) {
+          const tasks = await env.DB.prepare('SELECT title, track, status, deadline FROM tasks ORDER BY id ASC LIMIT 15').all();
+          tasksContext = '\nActive Sprint Tasks:\n' + (tasks.results || []).map(t => `- [${t.status}] ${t.title} (${t.track})${t.deadline ? ' due ' + t.deadline : ''}`).join('\n');
+        }
+      }
+
+      // 3. Meeting Bridges
       let calContext = '';
-      if (/meet|call|sync|calendar|slot|bridge|schedule|google|today|event/.test(lower) || lower.length < 15) {
+      if (/meet|call|sync|calendar|slot|bridge|schedule|google|today|event/.test(lower) || lower.length < 20) {
         const slots = await env.DB.prepare('SELECT slot_name, slot_code FROM meeting_slots LIMIT 6').all();
         calContext = '\nMeeting Bridges:\n' + (slots.results || []).map(s => `- ${s.slot_name} (${s.slot_code})`).join('\n');
       }
@@ -990,11 +1121,18 @@ export async function onRequest(context) {
       let memory = null;
       try {
         memory = await env.DB.prepare('SELECT memory_data FROM member_memories WHERE member_id = ?').bind(memberId).first();
-      } catch (e) {}
+      } catch (e) { }
 
       const systemPrompt = `You are Frontier Oracle, the AI project assistant for the Frontier AI engineering workspace.
-Current User: ${member.name} (@${member.handle}) — ${member.role}${memory?.memory_data ? '\nUser Profile: ' + memory.memory_data : ''}${tasksContext}${calContext}
-Be concise, authoritative, and strictly grounded in the workspace data. Answer clearly using plain text or brief markdown highlights.`;
+Current User: ${member.name} (@${member.handle || member.email}) — ${member.role}${memory?.memory_data ? '\nUser Profile: ' + memory.memory_data : ''}
+${teamRosterContext}
+${tasksContext}
+${calContext}
+
+GUIDELINES:
+1. Provide concise, direct, authoritative answers grounded strictly in the workspace data and Active Team Roster above.
+2. If asked who is on the team or what someone's track/role is, always consult and report from the Active Team Roster.
+3. Use clean markdown formatting (bullet points, bold highlights).`;
 
       let modelReply = '';
       let groqDiagnostic = null;
@@ -1058,7 +1196,12 @@ Be concise, authoritative, and strictly grounded in the workspace data. Answer c
 
       // Intelligent offline fallback
       if (!modelReply) {
-        if (lower.includes('task') || lower.includes('todo') || lower.includes('sprint')) {
+        if (lower.includes('member') || lower.includes('team') || lower.includes('who') || lower.includes('roster') || lower.includes('track')) {
+          const membersRes = await env.DB.prepare('SELECT name, role, team_track, is_host FROM members WHERE is_allowed = 1').all();
+          modelReply = `Active Team Roster:\n` +
+            (membersRes.results || []).map(m => `• **${m.name}** — ${m.role} [Track: ${m.team_track || 'General'}]${m.is_host ? ' (Team Host & Lead)' : ''}`).join('\n') +
+            (groqDiagnostic ? `\n\n[Notice: ${groqDiagnostic}]` : '');
+        } else if (lower.includes('task') || lower.includes('todo') || lower.includes('sprint')) {
           const tasks = await env.DB.prepare('SELECT title, track, status, deadline FROM tasks LIMIT 15').all();
           modelReply = `Active workspace tasks:\n` +
             (tasks.results || []).map(t => `• ${t.title} — ${t.status} (${t.track})`).join('\n') +

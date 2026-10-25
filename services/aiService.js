@@ -13,8 +13,8 @@ export function buildWorkspaceContext(db, currentUser, userMessage = '') {
   parts.push(`CURRENT USER: ${currentUser.name} (@${currentUser.handle}) | Role: ${currentUser.role} | Track: ${currentUser.team_track} | Is Host: ${currentUser.is_host ? 'YES' : 'NO'}`);
 
   // 2. Member Directory (Always compact, ~60 tokens for 8 members)
-  const members = db.prepare('SELECT id, name, handle, role, team_track FROM members').all();
-  parts.push("TEAM DIRECTORY:\n" + members.map(m => `- ${m.name} (@${m.handle}): ${m.role} [${m.team_track}]`).join("\n"));
+  const members = db.prepare('SELECT id, name, handle, role, team_track, is_host FROM members WHERE is_allowed = 1 ORDER BY is_host DESC, id ASC').all();
+  parts.push("TEAM DIRECTORY:\n" + members.map(m => `- ${m.name} (@${m.handle}): ${m.role} [Track: ${m.team_track || 'General'}]${m.is_host ? ' (Lead)' : ''}`).join("\n"));
 
   // 3. Dynamic Intent Filter: Tasks (~50-100 tokens only when relevant)
   const taskKeywords = /task|todo|progress|deliverable|deadline|work|sprint|pr|blocked|status/;
