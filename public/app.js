@@ -3704,12 +3704,13 @@ function setupGlobalSearch() {
 let openCommandPalette = () => {};
 
 function setupCommandPalette() {
-  const modal = document.getElementById('modal-command-palette');
+  const overlay = document.getElementById('command-palette-overlay');
+  const card = document.getElementById('modal-command-palette');
   const input = document.getElementById('palette-search-input');
   const resultsContainer = document.getElementById('palette-results-list');
   const escBtn = document.getElementById('btn-close-palette-esc');
 
-  if (!modal || !input || !resultsContainer) return;
+  if (!overlay || !input || !resultsContainer) return;
 
   let isPaletteOpen = false;
   let selectedIndex = 0;
@@ -3718,13 +3719,7 @@ function setupCommandPalette() {
   openCommandPalette = (initialQuery = '') => {
     input.value = initialQuery;
     selectedIndex = 0;
-    try {
-      if (!modal.open) {
-        modal.showModal();
-      }
-    } catch (err) {
-      modal.setAttribute('open', '');
-    }
+    overlay.classList.remove('hidden');
     isPaletteOpen = true;
     renderResults(initialQuery);
     requestAnimationFrame(() => {
@@ -3735,12 +3730,7 @@ function setupCommandPalette() {
 
   const closePalette = () => {
     isPaletteOpen = false;
-    try {
-      if (modal.open) {
-        modal.close();
-      }
-    } catch (err) {}
-    modal.removeAttribute('open');
+    overlay.classList.add('hidden');
     input.blur();
   };
 
@@ -3758,13 +3748,13 @@ function setupCommandPalette() {
   window.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
-      if (modal.open || modal.hasAttribute('open') || isPaletteOpen) {
+      if (isPaletteOpen) {
         closePalette();
       } else {
         openCommandPalette();
       }
     } else if (e.key === 'Escape') {
-      if (modal.open || modal.hasAttribute('open') || isPaletteOpen) {
+      if (isPaletteOpen) {
         e.preventDefault();
         e.stopPropagation();
         closePalette();
@@ -3772,24 +3762,10 @@ function setupCommandPalette() {
     }
   }, true);
 
-  modal.addEventListener('cancel', (e) => {
-    e.preventDefault();
-    closePalette();
-  });
-
-  // Clicking backdrop closes palette (check bounding rect of the modal dialog box)
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) {
-      const rect = modal.getBoundingClientRect();
-      const isInDialog = (
-        rect.top <= e.clientY &&
-        e.clientY <= rect.top + rect.height &&
-        rect.left <= e.clientX &&
-        e.clientX <= rect.left + rect.width
-      );
-      if (!isInDialog) {
-        closePalette();
-      }
+  // Clicking overlay backdrop closes palette
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) {
+      closePalette();
     }
   });
 

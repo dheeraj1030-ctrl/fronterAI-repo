@@ -3941,13 +3941,30 @@ button:active:not(:disabled),
 /* ==============================================================================
    COMMAND PALETTE (CTRL+K) — SPOTLIGHT & RAYCAST GLASS DESIGN
    ============================================================================== */
-.command-palette-dialog {
-  display: none;
+.command-palette-overlay {
   position: fixed !important;
-  top: 14vh !important;
-  left: 50% !important;
-  transform: translateX(-50%) !important;
-  margin: 0 !important;
+  inset: 0 !important;
+  background: rgba(8, 10, 15, 0.72) !important;
+  backdrop-filter: blur(10px) !important;
+  -webkit-backdrop-filter: blur(10px) !important;
+  z-index: 99999 !important;
+  display: flex !important;
+  justify-content: center !important;
+  align-items: flex-start !important;
+  padding-top: 14vh !important;
+  animation: palette-overlay-fade 0.15s ease-out !important;
+}
+
+.command-palette-overlay.hidden {
+  display: none !important;
+}
+
+@keyframes palette-overlay-fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.command-palette-card {
   width: min(640px, calc(100vw - 32px)) !important;
   max-width: 640px !important;
   background: rgba(22, 24, 30, 0.96) !important;
@@ -3958,30 +3975,9 @@ button:active:not(:disabled),
   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.06) !important;
   color: var(--text-primary) !important;
   overflow: hidden !important;
-  z-index: 99999 !important;
-  animation: palette-slide-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
-}
-
-.command-palette-dialog[open] {
   display: flex !important;
   flex-direction: column !important;
-}
-
-@keyframes palette-slide-in {
-  from {
-    opacity: 0;
-    transform: translate(-50%, -12px) scale(0.98);
-  }
-  to {
-    opacity: 1;
-    transform: translate(-50%, 0) scale(1);
-  }
-}
-
-.command-palette-dialog::backdrop {
-  background: rgba(8, 10, 15, 0.75) !important;
-  backdrop-filter: blur(8px) !important;
-  -webkit-backdrop-filter: blur(8px) !important;
+  animation: palette-slide-in 0.18s cubic-bezier(0.16, 1, 0.3, 1) !important;
 }
 
 .palette-input-wrap {
